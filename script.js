@@ -1,6 +1,8 @@
 const taskInput = document.getElementById("taskInput");
 const addTaskButton = document.getElementById("addTaskButton");
-
+const todoColumn = document.getElementById("todo");
+const progressColumn = document.getElementById("progress");
+const reviewColumn = document.getElementById("review");
 const columns = ["todo", "progress", "review"];
 
 addTaskButton.addEventListener("click", addTask);
@@ -11,7 +13,7 @@ taskInput.addEventListener("keydown", function(event) {
     }
 });
 
-function addTask() {
+async function addTask() {
     const text = taskInput.value.trim();
 
     if (text === "") {
@@ -19,12 +21,42 @@ function addTask() {
         return;
     }
 
+    addTaskButton.disabled = true;
+    addTaskButton.textContent = "✨ Генерируем...";
+
+    try {
+        const specification = await generateTaskSpecification(text);
+        createTask(specification, text);
+        taskInput.value = "";
+        taskInput.focus();
+    } catch (error) {
+        alert(`Не удалось сгенерировать ТЗ: ${error.message}`);
+    } finally {
+        addTaskButton.disabled = false;
+        addTaskButton.textContent = "✨ Сгенерировать ТЗ";
+    }
+}
+
+function createTask(specification, fallbackTitle) {
     const task = document.createElement("div");
     task.className = "task";
 
     const title = document.createElement("div");
     title.className = "task-title";
-    title.textContent = text;
+    title.textContent = specification.title || fallbackTitle;
+
+    const branch = document.createElement("div");
+    branch.className = "task-branch";
+    branch.textContent = `Ветка: ${specification.branch || "feat/task"}`;
+
+    const details = document.createElement("div");
+    details.className = "task-details";
+    details.innerHTML = `
+        <strong>Критерии приемки:</strong>
+        <ul>${toListItems(specification.acceptanceCriteria)}</ul>
+        <strong>Шаги реализации:</strong>
+        <ol>${toListItems(specification.steps)}</ol>
+    `;
 
     const buttons = document.createElement("div");
     buttons.className = "task-buttons";
@@ -47,11 +79,25 @@ function addTask() {
     buttons.appendChild(rightButton);
 
     task.appendChild(title);
+    task.appendChild(branch);
+    task.appendChild(details);
     task.appendChild(buttons);
 
     document.getElementById("todo").appendChild(task);
-    taskInput.value = "";
-    taskInput.focus();
+}
+
+function toListItems(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+        return "<li>Не указано</li>";
+    }
+
+    return items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+}
+
+function escapeHtml(value) {
+    const element = document.createElement("span");
+    element.textContent = String(value);
+    return element.innerHTML;
 }
 
 function moveTask(task, direction) {

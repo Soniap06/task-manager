@@ -94,6 +94,30 @@ main {
     margin-bottom: 12px;
 }
 
+.task-branch {
+    color: #666;
+    font-family: monospace;
+    font-size: 13px;
+    margin-bottom: 12px;
+    overflow-wrap: anywhere;
+}
+
+.task-details {
+    font-size: 14px;
+    line-height: 1.45;
+    margin-bottom: 14px;
+}
+
+.task-details strong {
+    display: block;
+    margin-top: 8px;
+}
+
+.task-details ul,
+.task-details ol {
+    padding-left: 20px;
+}
+
 .task-buttons {
     display: flex;
     gap: 6px;
