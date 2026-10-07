@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h1>Task Manager ✨</h1>
+    <p>Управление задачами проекта</p>
+</header>
+
+<main>
+    <section class="task-form">
+        <input
+            type="text"
+            id="taskInput"
+            placeholder="Например: Сделать форму логина"
+        >
+        <button id="addTaskButton">✨ Сгенерировать ТЗ</button>
+    </section>
+
+    <section class="board">
+        <div class="column">
+            <h2>To Do</h2>
+            <div class="task-list" id="todo"></div>
+        </div>
+
+        <div class="column">
+            <h2>In Progress</h2>
+            <div class="task-list" id="progress"></div>
+        </div>
+
+        <div class="column">
+            <h2>Review</h2>
+            <div class="task-list" id="review"></div>
+        </div>
+    </section>
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
