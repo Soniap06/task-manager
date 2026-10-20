@@ -37,6 +37,46 @@ main {
     margin-bottom: 30px;
 }
 
+.project-panel {
+    background: white;
+    border: 1px solid #d8dee4;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 24px;
+    line-height: 1.5;
+}
+
+.project-panel label {
+    display: block;
+    margin-top: 10px;
+    font-weight: 600;
+}
+
+.project-panel input,
+.project-panel select {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    padding: 9px;
+    margin: 6px 0 10px;
+    border: 1px solid #bac4ce;
+    border-radius: 6px;
+    font-size: 15px;
+}
+
+.project-panel button,
+.project-panel a {
+    display: inline-block;
+    margin: 5px 8px 5px 0;
+    padding: 7px 10px;
+}
+
+.project-panel [hidden] { display: none; }
+
+.project-panel details { margin-top: 14px; }
+.project-panel summary { cursor: pointer; font-weight: 600; }
+#projectInfo { overflow-wrap: anywhere; }
+
 .task-form input {
     flex: 1;
     padding: 14px 16px;
@@ -57,6 +97,39 @@ main {
 
 .task-form button:hover {
     opacity: 0.85;
+}
+
+button:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+#connectionStatus,
+#feedback {
+    margin-bottom: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+#refreshButton {
+    margin-bottom: 20px;
+    padding: 8px 12px;
+}
+
+.task-status,
+.task-error {
+    font-size: 14px;
+    line-height: 1.45;
+    margin-bottom: 12px;
+    overflow-wrap: anywhere;
+}
+
+.task-error {
+    color: #a12424;
+}
+
+.task-branch a {
+    color: #2255a4;
 }
 
 .board {
@@ -143,4 +216,95 @@ main {
     .task-form {
         flex-direction: column;
     }
+}
+
+.site-nav {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.site-nav a, .board-link {
+    display: inline-block;
+    padding: 10px 16px;
+    border-radius: 8px;
+    color: #2255a4;
+    text-decoration: none;
+}
+
+.site-nav a[aria-current="page"], .board-link {
+    background: #222;
+    color: white;
+}
+
+.site-nav a:hover, .board-project a:hover { text-decoration: underline; }
+.projects-page { max-width: 820px; padding-bottom: 32px; }
+.projects-page > p { margin: 12px 0; line-height: 1.5; }
+.board-project {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px;
+    margin-bottom: 24px;
+    background: white;
+    border: 1px solid #d8dee4;
+    border-radius: 12px;
+}
+.board-project > div { min-width: 0; }
+.board-project span { font-size: 13px; color: #666; }
+.board-project p { margin-top: 5px; font-weight: 600; }
+.board-project a { color: #2255a4; }
+
+#connectionStatus:empty, #feedback:empty { display: none; }
+
+.task { padding: 0; }
+.task-open {
+    display: block;
+    width: 100%;
+    min-height: 80px;
+    padding: 16px;
+    margin: 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+.task-open:hover { background: #f7f9fb; }
+.task-open:focus-visible { outline: 2px solid #2255a4; outline-offset: 2px; }
+.task-buttons { padding: 0 16px 16px; }
+
+#taskDialog {
+    margin: auto;
+    padding: 24px;
+    width: min(680px, calc(100% - 32px));
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    border: 1px solid #d8dee4;
+    border-radius: 14px;
+    color: #222;
+}
+#taskDialog::backdrop { background: rgb(0 0 0 / 45%); }
+.task-dialog-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.task-dialog-header h2 { font-size: 21px; overflow-wrap: anywhere; min-width: 0; }
+#taskDialog button { padding: 8px 12px; cursor: pointer; }
+#closeTaskDialog { flex-shrink: 0; }
+@media (max-width: 480px) {
+    #taskDialog { padding: 18px; }
+    .task-dialog-header { flex-direction: column-reverse; }
+    #closeTaskDialog { align-self: flex-end; }
 }

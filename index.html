@@ -11,17 +11,30 @@
 <header>
     <h1>Task Manager ✨</h1>
     <p>Управление задачами проекта</p>
+    <nav class="site-nav" aria-label="Основная навигация">
+        <a href="index.html" aria-current="page">Доска задач</a>
+        <a href="projects.html">Проекты</a>
+    </nav>
 </header>
 
 <main>
+    <section class="board-project" aria-label="Текущий проект">
+        <div><span>Текущий проект</span><p id="projectInfo">Загружаем проект…</p></div>
+        <a href="projects.html">Выбрать или настроить проект →</a>
+    </section>
     <section class="task-form">
         <input
             type="text"
             id="taskInput"
+            aria-label="Название задачи"
+            maxlength="500"
             placeholder="Например: Сделать форму логина"
         >
-        <button id="addTaskButton">✨ Сгенерировать ТЗ</button>
+        <button id="addTaskButton" disabled>✨ Создать задачу и ветку</button>
     </section>
+    <p id="connectionStatus" role="status">Подключаемся к серверу…</p>
+    <p id="feedback" role="status" aria-live="polite"></p>
+    <button id="refreshButton" type="button">Обновить доску</button>
 
     <section class="board">
         <div class="column">
@@ -41,7 +54,13 @@
     </section>
 </main>
 
-<script src="ai-api.js"></script>
+<dialog id="taskDialog" aria-labelledby="taskDialogTitle">
+    <div class="task-dialog-header">
+        <h2 id="taskDialogTitle"></h2>
+        <button id="closeTaskDialog" type="button" aria-label="Закрыть задачу" autofocus>Закрыть ×</button>
+    </div>
+    <div id="taskDialogContent"></div>
+</dialog>
 <script src="script.js"></script>
 </body>
 </html>

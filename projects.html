@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Проекты — Task Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+    <h1>Task Manager ✨</h1>
+    <p>Управление задачами проекта</p>
+    <nav class="site-nav" aria-label="Основная навигация">
+        <a href="index.html">Доска задач</a>
+        <a href="projects.html" aria-current="page">Проекты</a>
+    </nav>
+</header>
+
+<main class="projects-page">
+    <h2>Проекты и репозитории</h2>
+    <p>Подключите репозиторий и выберите проект, с которым хотите работать на доске.</p>
+    <p id="connectionStatus" role="status">Подключаемся к серверу…</p>
+    <p id="feedback" role="status" aria-live="polite"></p>
+    <section class="project-panel" aria-label="Рабочий проект">
+        <label for="projectSelect">Проект и репозиторий</label>
+        <select id="projectSelect"><option value="">Подключите проект</option></select>
+        <p id="projectInfo"></p>
+        <label for="projectBaseInput">Базовая ветка для новых задач</label>
+        <input id="projectBaseInput" maxlength="200" placeholder="Базовая ветка">
+        <button id="saveBaseButton" type="button" disabled>Сохранить базу</button>
+        <button id="archiveProjectButton" type="button" disabled>Отключить проект</button>
+        <details id="connectPanel">
+            <summary>Подключить существующий репозиторий</summary>
+            <p>Выберите репозиторий, доступный GitHub App, или вставьте GitHub-ссылку.</p>
+            <button id="loadReposButton" type="button">Обновить репозитории App</button>
+            <a id="installationLink" target="_blank" rel="noopener noreferrer" hidden>Настроить доступ на GitHub</a>
+            <label for="repoSearch">Поиск в списке</label>
+            <input id="repoSearch" type="search" placeholder="owner/repository">
+            <label for="repositorySelect">Доступные GitHub App репозитории</label>
+            <select id="repositorySelect"><option value="">Сначала загрузите список</option></select>
+            <label for="repositoryUrl">Или ссылка на репозиторий</label>
+            <input id="repositoryUrl" type="url" placeholder="https://github.com/owner/repository">
+            <button id="resolveRepoButton" type="button">Найти по ссылке</button>
+            <label for="baseBranchInput">Базовая ветка</label>
+            <input id="baseBranchInput" maxlength="200" list="repositoryBranches" placeholder="Основная ветка репозитория">
+            <datalist id="repositoryBranches"></datalist>
+            <button id="connectRepoButton" type="button" disabled>Подключить</button>
+        </details>
+    </section>
+    <a class="board-link" id="openBoardLink" href="index.html">Открыть доску задач →</a>
+</main>
+<script src="projects.js"></script>
+</body>
+</html>

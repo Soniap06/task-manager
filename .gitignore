@@ -1,1 +1,15 @@
+node_modules/
 ai-api.js
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+coverage/
+tmp/
+github-app-keys/
+.data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
