@@ -1,19 +1,12 @@
-# Инструкция по загрузке
+# Развёртывание
 
-## В репозиторий GitHub
-Загрузите файлы из архива с сохранением структуры:
-- `package.json`, `server.js`, `.gitignore`, `README.md`, `DEPLOYMENT.md`
-- папку `public` целиком, включая `index.html`, `css/style.css`, `js/app.js`
+Приложению нужен хостинг Node.js, который поддерживает постоянный диск для SQLite. GitHub Pages не запускает Express-сервер и не подходит для этой версии.
 
-При необходимости замените старые файлы первой версии. Новая структура использует `public/`, а не корневые `style.css` и `script.js`.
+1. Загрузите репозиторий на Node.js-хостинг с persistent disk.
+2. Команда сборки/установки: `npm install`.
+3. Команда запуска: `npm start`.
+4. Добавьте переменные из `.env.example` в секреты хостинга. Установите `NODE_ENV=production`, длинный уникальный `SESSION_SECRET`, `DEMO_USERNAME`, `DEMO_PASSWORD` и `GITHUB_WEBHOOK_SECRET`. Для Qwen укажите `QWEN_API_KEY`.
+5. Убедитесь, что папка `data/` находится на постоянном диске; иначе SQLite-база может потеряться при перезапуске или новом деплое.
+6. Для GitHub Webhooks используйте публичный HTTPS URL вида `https://your-host.example/api/webhooks/github` и тот же секрет, что в `GITHUB_WEBHOOK_SECRET`.
 
-## Запуск
-1. Установите Node.js 20+ с https://nodejs.org/
-2. Скачайте/распакуйте папку проекта.
-3. Откройте терминал в папке, где лежит `package.json`.
-4. Выполните `npm install`.
-5. Выполните `npm start`.
-6. Откройте `http://localhost:3000`.
-
-## GitHub Pages
-GitHub Pages не запускает сервер Node.js, REST API и SQLite. Поэтому для проверки всех функций запускайте локально или разверните Node.js-приложение на подходящем хостинге. Для постоянной базы на облачном хостинге используйте persistent disk либо PostgreSQL.
+Не коммитьте `.env`, API-ключи, пароли или файлы базы данных.

@@ -1,8 +1,8 @@
 node_modules/
 .idea/
-data/*.db
 .env
 .env.*
 !.env.example
 .DS_Store
 npm-debug.log*
+data/*.db
