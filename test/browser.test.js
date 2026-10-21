@@ -87,6 +87,30 @@ test("browser retains the same requestId after a lost response", async () => {
     assert.equal(f.storage.size, 0);
 });
 
+test("board search and drag/drop preserve project tasks and only request a status change", async () => {
+    let mutation;
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (options.method === "POST") {
+            mutation = { url, body: JSON.parse(options.body) };
+            return { task: task({ column: "review" }) };
+        }
+        return { tasks: [task(), task({ id: "task-2", title: "Другая задача", acceptanceCriteria: [] })] };
+    });
+    await tick();
+    f.nodes.taskSearch.value = "Форма";
+    f.nodes.taskSearch.listeners.input();
+    assert.equal(f.nodes.todo.children.length, 1);
+    f.nodes.taskSearch.value = "";
+    f.nodes.taskSearch.listeners.input();
+    assert.equal(f.nodes.todo.children.length, 2);
+    f.nodes.review.listeners.drop({ preventDefault() {}, dataTransfer: { getData: () => "task-1" } });
+    await tick();
+    assert.equal(mutation.url, "/api/tasks/task-1/column");
+    assert.equal(mutation.body.column, "review");
+    assert.equal(f.nodes.review.children.length, 1);
+});
+
 test("saved tasks resolve a matching pending draft in their own project", async () => {
     const draft = { projectId: projectA.id, requestId: randomUUID(), title: "Черновик" };
     const f = browser(async () => ({ tasks: [task({ requestId: draft.requestId, column: "review" })] }), draft);

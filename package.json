@@ -2,13 +2,14 @@
   "name": "task-manager",
   "version": "0.1.0",
   "private": true,
-  "description": "Учебная канбан-доска с LLM и планируемой интеграцией GitHub",
+    "description": "Учебная канбан-доска с GitHub App, командой, событиями и LLM",
   "engines": {
     "node": "24.x"
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --watch --env-file-if-exists=.env server.js",
     "check": "node scripts/check.mjs",
     "test": "node --test test/*.test.js",
     "db:init": "node --env-file-if-exists=.env scripts/db-init.js",

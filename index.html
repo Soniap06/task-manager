@@ -14,6 +14,10 @@
     <nav class="site-nav" aria-label="Основная навигация">
         <a href="index.html" aria-current="page">Доска задач</a>
         <a href="projects.html">Проекты</a>
+        <a href="/team">Сотрудники</a>
+        <a href="/events">События</a>
+        <a href="/profile">Профиль</a>
+        <a href="/login">Вход</a>
     </nav>
 </header>
 
@@ -30,10 +34,13 @@
             maxlength="500"
             placeholder="Например: Сделать форму логина"
         >
+        <select id="assigneeSelect" aria-label="Исполнитель задачи"><option value="">Не назначен</option></select>
         <button id="addTaskButton" disabled>✨ Создать задачу и ветку</button>
     </section>
     <p id="connectionStatus" role="status">Подключаемся к серверу…</p>
     <p id="feedback" role="status" aria-live="polite"></p>
+    <label for="taskSearch">Поиск по задачам</label>
+    <input id="taskSearch" type="search" placeholder="Название, описание или ветка">
     <button id="refreshButton" type="button">Обновить доску</button>
 
     <section class="board">

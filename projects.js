@@ -24,6 +24,7 @@ async function api(url, options = {}) {
     } catch { throw new Error("Нет ответа сервера. Обновите страницу перед повтором: операция могла завершиться."); }
     let data;
     try { data = await response.json(); } catch { throw new Error("Сервер вернул непонятный ответ. Обновите страницу."); }
+    if (response.status === 401) location.assign("/login");
     if (!response.ok) throw new Error(data.error?.message || `Ошибка HTTP ${response.status}`);
     return data;
 }

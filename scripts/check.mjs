@@ -14,17 +14,20 @@ for (const file of jsFiles) {
     if (result.error) throw result.error;
     if (result.status !== 0) failed = true;
 }
-for (const page of ["index.html", "projects.html"]) {
+const pageRoutes = new Set(["/team", "/events", "/profile", "/login"]);
+for (const page of ["index.html", "projects.html", "public/index.html"]) {
     const html = readFileSync(path.join(root, page), "utf8");
     for (const match of html.matchAll(/(?:src|href)=["']([^"']+)["']/g)) {
         const resource = match[1];
         if (/^(?:[a-z]+:|\/\/|#)/i.test(resource)) continue;
+        if (pageRoutes.has(resource) || resource === "/" || resource === "/logout") continue;
         const localPath = resource.split(/[?#]/)[0].replace(/^\//, "");
-        if (!existsSync(path.join(root, localPath))) {
+        const filename = /^(css|js)\//.test(localPath) ? path.join(root, "public", localPath) : path.join(root, localPath);
+        if (!existsSync(filename)) {
             console.error(`Не найден ресурс ${resource} в ${page}.`);
             failed = true;
         }
     }
 }
 if (failed) process.exitCode = 1;
-else console.log(`Проверка пройдена: синтаксис ${jsFiles.length} JS-файлов и локальные ресурсы обеих HTML-страниц. Поведение приложения не проверялось.`);
+else console.log(`Проверка пройдена: синтаксис ${jsFiles.length} JS-файлов и локальные ресурсы HTML-страниц. Поведение приложения не проверялось.`);

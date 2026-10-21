@@ -29,11 +29,11 @@ test("SQLite: инициализация повторяема, данные со
     } finally { database.close(); }
     database = openDatabase(filename);
     try {
-        assert.equal(database.prepare("PRAGMA user_version").get().user_version, 1);
+        assert.equal(database.prepare("PRAGMA user_version").get().user_version, 2);
         assert.equal(database.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
         assert.equal(database.prepare("SELECT display_name FROM users WHERE id = ?").get(USER).display_name, "Карина");
         const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
-        assert.deepEqual(tables, ["employees", "events", "projects", "tasks", "users"]);
+        assert.deepEqual(tables, ["employees", "events", "projects", "tasks", "users", "webhook_deliveries"]);
         assert.equal(database.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
     } finally { database.close(); }
 });
@@ -106,6 +106,24 @@ test("SQLite: новая версия БД не понижается и не п�
     try {
         assert.equal(database.prepare("PRAGMA user_version").get().user_version, 99);
         assert.equal(database.prepare("SELECT value FROM marker").get().value, "сохранено");
+    } finally { database.close(); }
+});
+
+test("SQLite: миграция версии 1 добавляет доставки webhook и сохраняет существующие записи", (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "task-manager-upgrade-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const filename = path.join(directory, "previous.sqlite");
+    let database = new DatabaseSync(filename);
+    database.exec(fs.readFileSync(path.join(__dirname, "../db/migrations/001-initial.sql"), "utf8"));
+    database.exec("PRAGMA user_version = 1");
+    database.prepare("INSERT INTO users (id, display_name) VALUES (?, 'Сохранить пользователя')").run(USER);
+    database.close();
+    database = openDatabase(filename);
+    try {
+        assert.equal(database.prepare("PRAGMA user_version").get().user_version, 2);
+        assert.equal(database.prepare("SELECT display_name FROM users WHERE id=?").get(USER).display_name, "Сохранить пользователя");
+        database.prepare("INSERT INTO webhook_deliveries (delivery_id) VALUES ('delivery')").run();
+        assert.throws(() => database.prepare("INSERT INTO webhook_deliveries (delivery_id) VALUES ('delivery')").run(), /UNIQUE/);
     } finally { database.close(); }
 });
 

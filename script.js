@@ -13,6 +13,19 @@ let activeProjectId = "";
 let boardTasks = [];
 let boardVersion = 0;
 let openTaskId = null;
+let employees = [];
+
+async function loadEmployees() {
+    const result = await api("/api/employees");
+    if (!Array.isArray(result)) return;
+    employees = result;
+    const select = byId("assigneeSelect");
+    for (const employee of employees) {
+        const option = element("option", "", `${employee.name} — ${employee.role}`);
+        option.value = employee.id;
+        select.appendChild(option);
+    }
+}
 
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -28,6 +41,7 @@ async function api(url, options = {}) {
     } catch { throw new Error("Нет ответа сервера. Обновите доску перед повтором: операция могла завершиться."); }
     let data;
     try { data = await response.json(); } catch { throw new Error("Сервер вернул непонятный ответ. Обновите доску."); }
+    if (response.status === 401) location.assign("/login");
     if (!response.ok) throw new Error(data.error?.message || `Ошибка HTTP ${response.status}`);
     return data;
 }
@@ -48,6 +62,7 @@ function updateControls() {
     const writable = Boolean(configured && project && !project.archived);
     taskInput.disabled = busy || !writable;
     addTaskButton.disabled = busy || !writable;
+    if (byId("assigneeSelect")) byId("assigneeSelect").disabled = busy || !writable;
     addTaskButton.textContent = busy ? "✨ Генерируем ТЗ и создаём ветку…" : "✨ Создать задачу и ветку";
     byId("projectInfo").textContent = activeProjectId === "legacy" ? "Архив прежних задач без подтверждённой привязки. Внешние операции отключены." : project ? `${project.fullName}${project.archived ? " · проект отключён" : ""}` : "Выберите проект на странице «Проекты», чтобы начать работу.";
     renderBoard();
@@ -101,7 +116,7 @@ async function addTask() {
         taskInput.value = draft.title;
         return;
     }
-    draft = draft || { projectId: project.id, requestId: crypto.randomUUID(), title };
+    draft = draft || { projectId: project.id, requestId: crypto.randomUUID(), title, assigneeId: byId("assigneeSelect")?.value || null };
     try { localStorage.setItem(draftKey(project.id), JSON.stringify(draft)); } catch {
         feedback.textContent = "Разрешите локальное хранилище браузера для сохранения requestId.";
         return;
@@ -135,9 +150,12 @@ async function updateTask(task, action, body = {}) {
 
 function renderBoard() {
     for (const column of columns) byId(column).replaceChildren();
-    for (const task of boardTasks) {
+    const query = byId("taskSearch").value.trim().toLocaleLowerCase("ru-RU");
+    for (const task of boardTasks.filter((item) => [item.title, item.input, item.branch, ...(item.acceptanceCriteria || []), ...(item.steps || [])].join(" ").toLocaleLowerCase("ru-RU").includes(query))) {
         const card = element("div", "task");
         card.dataset.taskId = task.id;
+        card.draggable = !busy;
+        card.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", task.id));
         const openButton = element("button", "task-title task-open", task.title);
         openButton.type = "button";
         openButton.setAttribute("aria-label", `Открыть задачу: ${task.title}`);
@@ -180,6 +198,7 @@ function renderTaskDetails() {
     } else branch.textContent = task.branch ? `Ветка: ${task.branch}` : "Имя ветки ещё не получено";
     content.appendChild(branch);
     content.appendChild(element("div", "task-status", task.legacyUnlinked ? "Нужна подтверждённая привязка к проекту" : stateLabels[task.state] || task.state));
+    if (task.assigneeId) content.appendChild(element("p", "", `Исполнитель: ${employees.find((employee) => employee.id === task.assigneeId)?.name || task.assigneeId}`));
     if (task.error) content.appendChild(element("div", "task-error", task.error.message));
     const details = element("div", "task-details");
     for (const [label, tag, items] of [["Критерии приёмки:", "ul", task.acceptanceCriteria], ["Шаги реализации:", "ol", task.steps]]) {
@@ -203,4 +222,14 @@ byId("closeTaskDialog").addEventListener("click", () => byId("taskDialog").close
 addTaskButton.addEventListener("click", addTask);
 taskInput.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); addTask(); } });
 byId("refreshButton").addEventListener("click", () => refreshProjects().catch(showError));
+byId("taskSearch").addEventListener("input", renderBoard);
+for (const column of columns) {
+    byId(column).addEventListener("dragover", (event) => event.preventDefault());
+    byId(column).addEventListener("drop", (event) => {
+        event.preventDefault();
+        const task = boardTasks.find((item) => item.id === event.dataTransfer.getData("text/plain"));
+        if (task && task.column !== column) updateTask(task, "column", { column });
+    });
+}
 refreshProjects().catch(showError);
+loadEmployees().catch(showError);

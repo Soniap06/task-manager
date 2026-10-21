@@ -8,7 +8,10 @@ const { TaskStore } = require("./lib/store");
 const { TaskService } = require("./lib/tasks");
 const { ProjectService } = require("./lib/projects");
 const { AppError, publicError } = require("./lib/errors");
-const { readJson } = require("./lib/http-json");
+const { readJson, readRaw } = require("./lib/http-json");
+const { createAuth } = require("./lib/auth");
+const { openDatabase } = require("./lib/database");
+const { Workspace } = require("./lib/workspace");
 
 const assets = new Map([
     ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -18,12 +21,27 @@ const assets = new Map([
     ["/script.js", ["script.js", "text/javascript; charset=utf-8"]],
     ["/style.css", ["style.css", "text/css; charset=utf-8"]]
 ]);
+for (const route of ["/team", "/events", "/profile", "/login"]) assets.set(route, ["public/index.html", "text/html; charset=utf-8"]);
+assets.set("/js/app.js", ["public/js/app.js", "text/javascript; charset=utf-8"]);
+assets.set("/css/style.css", ["public/css/style.css", "text/css; charset=utf-8"]);
 
 async function createApp({ config = loadConfig(), github = new GitHubClient(config.github), generate = createLlm(config.llm), store } = {}) {
     store = store || await new TaskStore(config.dataDir).open();
     const projects = new ProjectService(store, github);
     const tasks = new TaskService(store, github, generate, projects);
+    let database;
+    let workspace;
+    const auth = createAuth(config.auth);
+    try {
+        database = openDatabase(path.join(config.dataDir, "task-manager.sqlite"));
+        workspace = new Workspace(database, store);
+    } catch (error) {
+        database?.close();
+        await store.close();
+        throw error;
+    }
     try { await tasks.recover(); } catch (error) {
+        database.close();
         await store.close();
         throw error;
     }
@@ -44,6 +62,33 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
             const url = new URL(request.url, origin);
             if (url.origin !== origin) throw new AppError(403, "host", "Недопустимый адрес запроса.");
             const route = url.pathname;
+            const mutation = ["POST", "PATCH", "DELETE"].includes(request.method);
+            if (route !== "/api/webhooks/github" && mutation &&
+                ((request.headers.origin && request.headers.origin !== origin) || ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"]))) {
+                throw new AppError(403, "origin", "Операция разрешена только со страницы локального приложения.");
+            }
+            if (request.method === "POST" && route === "/api/webhooks/github") {
+                const result = workspace.webhook(await readRaw(request), request.headers, config.webhookSecret);
+                json(response, result.duplicate ? 200 : 202, result);
+                return;
+            }
+            if (request.method === "GET" && route === "/api/health") {
+                json(response, 200, { ok: true });
+                return;
+            }
+            if (request.method === "GET" && route === "/api/auth/status") {
+                json(response, 200, auth.status(request));
+                return;
+            }
+            if (request.method === "POST" && ["/api/auth/login", "/api/auth/logout"].includes(route)) {
+                if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") throw new AppError(415, "content_type", "Используйте application/json.");
+                const body = await readJson(request, 16_384);
+                if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError(400, "body", "Ожидался объект.");
+                response.setHeader("Set-Cookie", route.endsWith("/login") ? auth.login(body) : auth.logout());
+                json(response, 200, { ok: true });
+                return;
+            }
+            if (route.startsWith("/api/")) auth.require(request);
             if (request.method === "GET" && assets.has(route)) {
                 const [file, type] = assets.get(route);
                 const content = await fs.readFile(path.join(config.root, file));
@@ -60,6 +105,39 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                     configured: !configurationError,
                     error: configurationError
                 });
+                return;
+            }
+            if (request.method === "GET" && route === "/api/employees") {
+                json(response, 200, workspace.employees());
+                return;
+            }
+            const employee = route.match(/^\/api\/employees\/([a-z\d-]+)$/i);
+            if (request.method === "GET" && employee) {
+                json(response, 200, workspace.employee(employee[1]));
+                return;
+            }
+            if (request.method === "GET" && ["/api/profile", "/api/events"].includes(route)) {
+                const projectId = url.searchParams.get("projectId");
+                if (projectId) projects.find(projectId);
+                if (route === "/api/events") {
+                    if (!projectId) throw new AppError(400, "project_required", "Выберите проект для просмотра событий.");
+                    json(response, 200, workspace.events(projectId));
+                } else {
+                    const username = auth.status(request).username;
+                    const selected = username ? workspace.employees().find((item) => item.id === username) : null;
+                    const assigned = selected ? store.list().filter((task) => task.assigneeId === selected.id && (!projectId || task.projectId === projectId)) : [];
+                    json(response, 200, selected ? { ...selected, stats: { in_progress: assigned.filter((task) => task.column === "progress").length, in_review: assigned.filter((task) => task.column === "review").length } } : { username, employee: null });
+                }
+                return;
+            }
+            if (request.method === "POST" && route === "/api/ai/generate-task") {
+                if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") throw new AppError(415, "content_type", "Используйте application/json.");
+                const body = await readJson(request, 16_384);
+                if (typeof body?.prompt !== "string" || body.prompt.trim().length < 5 || body.prompt.length > 500) throw new AppError(400, "prompt", "Опишите задачу: от 5 до 500 символов.");
+                if (body.projectId) projects.find(body.projectId);
+                const { validateSpecification } = require("./lib/llm");
+                const spec = validateSpecification(await generate(body.prompt, { repository: body.projectId ? projects.find(body.projectId).fullName : null }));
+                json(response, 200, { description: spec.steps.join("\n"), acceptance_criteria: spec.acceptanceCriteria });
                 return;
             }
             if (request.method === "GET" && route === "/api/tasks") {
@@ -104,7 +182,10 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                 let task;
                 if (retry) task = await tasks.retry(retry[1]);
                 else if (move) task = await tasks.move(move[1], body.column);
-                else task = await tasks.create(body);
+                else {
+                    if (body.assigneeId != null) workspace.employee(body.assigneeId);
+                    task = await tasks.create(body);
+                }
                 json(response, 200, { task });
                 return;
             }
@@ -125,6 +206,7 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
         await tasks.queue;
         await projects.queue;
         await store.close();
+        database.close();
     };
     return { server, tasks, projects, store, close };
 }

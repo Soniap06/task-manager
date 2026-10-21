@@ -1,5 +1,6 @@
 node_modules/
 ai-api.js
+ai.config.json
 .env
 .env.*
 !.env.example
@@ -13,3 +14,10 @@ github-app-keys/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+.idea/
+npm-debug.log*
+data/
+*.db
+*.db-shm
+*.db-wal
