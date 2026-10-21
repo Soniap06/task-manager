@@ -44,7 +44,7 @@ function browser(handler, draft = null, page = "index", search = "") {
     vm.runInContext(fs.readFileSync(require.resolve(page === "index" ? "../script.js" : "../projects.js"), "utf8"), context);
     return { nodes, storage, session, context, calls };
 }
-const task = (patch = {}) => ({ ...specification, projectId: projectA.id, repository: projectA.fullName, id: "task-1", column: "todo", state: "branch_created", branchUrl: "https://github.com/example/books/tree/feat/example", ...patch });
+const task = (patch = {}) => ({ ...specification, branch: "feat/example", projectId: projectA.id, repository: projectA.fullName, id: "task-1", column: "todo", state: "branch_created", branchUrl: "https://github.com/example/books/tree/feat/example", ...patch });
 
 test("browser guards double Enter and renders model output as text", async () => {
     let release;
@@ -217,8 +217,8 @@ test("board hides task details until opening the accessible task dialog", async 
     assert.equal(content.children[0].textContent, item.repository);
     assert.equal(content.children[1].children[0].href, item.branchUrl);
     const details = content.children[3];
-    assert.equal(details.children[1].children[0].textContent, "<b>Критерий</b>");
-    assert.equal(details.children[3].children[0].textContent, "Первый шаг");
+    assert.ok(details.children.some((node) => node.tag === "ul" && node.children[0].textContent === "<b>Критерий</b>"));
+    assert.ok(details.children.some((node) => node.tag === "ol" && node.children[0].textContent === "Первый шаг"));
     f.nodes.closeTaskDialog.listeners.click();
     assert.equal(f.nodes.taskDialog.open, false);
 });
@@ -255,4 +255,54 @@ test("repository search clears a hidden selection and prevents connecting the wr
     assert.equal(f.nodes.repositoryBranches.children.length, 0);
     await f.nodes.connectRepoButton.listeners.click();
     assert.equal(f.calls.some((call) => call.options.method === "POST"), false);
+});
+
+const descendants = (node) => [node, ...node.children.flatMap(descendants)];
+
+test("draft opens questions, blocks empty answers and only confirms explicit reviewed values", async () => {
+    let confirmBody;
+    const draft = task({ branch: null, branchUrl: null, draftVersion: 1, state: "clarification_required", draftRevision: 1, input: "Исходный запрос", questions: ["По префиксу или подстроке?"] });
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (options.method !== "POST") return { tasks: [] };
+        if (url.endsWith("/confirm")) { confirmBody = JSON.parse(options.body); return { task: task({ ...draft, ...confirmBody, branch: "feat/task-id", state: "branch_created" }) }; }
+        return { task: draft };
+    });
+    await tick();
+    f.nodes.taskInput.value = "Исходный запрос";
+    await f.nodes.addTaskButton.listeners.click();
+    assert.equal(f.nodes.taskDialog.open, true);
+    let nodes = descendants(f.nodes.taskDialogContent);
+    const confirm = nodes.find((node) => node.className === "confirm-task");
+    await confirm.listeners.click();
+    assert.equal(confirmBody, undefined);
+    assert.ok(nodes.some((node) => node.textContent === "Заполните название, описание и ответы на все вопросы."));
+    for (const [key, value] of [["title", "Новое название"], ["description", "Проверенное описание"], ["answers", "По подстроке"]]) {
+        const input = nodes.find((node) => node.dataset.editor === key);
+        input.value = value;
+        input.listeners.input();
+    }
+    await confirm.listeners.click();
+    assert.deepEqual(confirmBody, { title: "Новое название", description: "Проверенное описание", answers: ["По подстроке"], draftRevision: 1 });
+    assert.ok(descendants(f.nodes.taskDialogContent).some((node) => node.textContent === "Ветка создана в GitHub"));
+});
+
+test("AI failure leaves editable manual draft, and failed confirmation preserves typed values", async () => {
+    const draft = task({ branch: null, branchUrl: null, draftVersion: 1, state: "generation_error", input: "Исходный текст", questions: [], error: { message: "Нет модели" } });
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (options.method === "POST") throw new Error("Network lost");
+        return { tasks: [draft] };
+    });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    let nodes = descendants(f.nodes.taskDialogContent);
+    const input = nodes.find((node) => node.dataset.editor === "description");
+    input.value = "Мой текст <script>";
+    input.listeners.input();
+    await nodes.find((node) => node.className === "confirm-task").listeners.click();
+    nodes = descendants(f.nodes.taskDialogContent);
+    assert.equal(nodes.find((node) => node.dataset.editor === "description").value, "Мой текст <script>");
+    assert.ok(nodes.some((node) => node.textContent?.startsWith("Нет ответа сервера.")));
+    assert.equal(f.nodes.addTaskButton.disabled, false);
 });

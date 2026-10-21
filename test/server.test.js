@@ -24,7 +24,10 @@ test("HTTP: creates, reloads, repeats and moves a task with one GitHub branch", 
     const response = await fetch(`${f.origin}/api/tasks`, { method: "POST", headers, body });
     assert.equal(response.status, 200);
     const { task } = await response.json();
-    assert.equal(task.state, "branch_created");
+    assert.equal(task.state, "draft_ready");
+    assert.equal(f.github.creates, 0);
+    const confirmed = await fetch(`${f.origin}/api/tasks/${task.id}/confirm`, { method: "POST", headers, body: JSON.stringify(task) });
+    assert.equal((await confirmed.json()).task.state, "branch_created");
     const again = await fetch(`${f.origin}/api/tasks`, { method: "POST", headers, body });
     assert.equal((await again.json()).task.id, task.id);
     const moved = await fetch(`${f.origin}/api/tasks/${task.id}/column`, { method: "POST", headers, body: JSON.stringify({ column: "progress" }) });
@@ -74,7 +77,7 @@ test("HTTP: team, profile and pure AI preview share the existing application wit
     assert.equal((await (await fetch(f.origin + "/api/profile")).json()).employee, null);
     const preview = await fetch(f.origin + "/api/ai/generate-task", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: "Форма входа", projectId: f.project.id }) });
     assert.equal(preview.status, 200);
-    assert.deepEqual((await preview.json()).acceptance_criteria, specification.acceptanceCriteria);
+    assert.deepEqual(await preview.json(), specification);
     assert.equal(f.store.list().length, 0);
     assert.equal(f.github.creates, 0);
     for (const path of ["/team", "/events", "/profile", "/login", "/css/style.css", "/js/app.js"]) assert.equal((await fetch(f.origin + path)).status, 200);
@@ -92,7 +95,7 @@ test("HTTP: assigning a known employee persists with the task; unknown employee 
     assert.equal((await response.json()).task.assigneeId, "karina");
     assert.equal(f.store.list()[0].assigneeId, "karina");
     assert.equal((await post("sofia")).status, 409);
-    assert.equal(f.github.creates, 1);
+    assert.equal(f.github.creates, 0);
 });
 
 test("HTTP: signed webhooks are scoped to connected projects, deduplicated and stored in SQLite", async (t) => {
@@ -169,4 +172,27 @@ test("HTTP: project catalog, link connection, base changes and disconnect never 
     assert.equal((await mutate(`/api/projects/${project.id}`, "PATCH", { archived: true })).project.archived, true);
     assert.equal((await fetch(f.origin + "/api/tasks")).status, 400);
     assert.equal(f.github.creates, 0);
+});
+
+test("HTTP: confirmation is explicit, scoped, validates answers and remains idempotent", async (t) => {
+    const f = await start(t);
+    f.tasks.generate = async () => ({ ...specification, questions: ["Как искать?"] });
+    const post = (route, body, extra = {}) => fetch(f.origin + route, { method: "POST", headers: { "Content-Type": "application/json", Origin: f.origin, ...extra }, body: JSON.stringify(body) });
+    const source = "Добавить поиск. Способ не выбран.";
+    const { task } = await (await post("/api/tasks", { projectId: f.project.id, requestId: randomUUID(), title: source, type: "tests" })).json();
+    const route = `/api/tasks/${task.id}/confirm`;
+    assert.equal(task.state, "clarification_required");
+    assert.equal(f.github.creates, 0);
+    assert.equal((await post(route, { ...specification, draftRevision: task.draftRevision, answers: [] })).status, 400);
+    assert.equal((await post(route, { ...specification, answers: ["По подстроке"] }, { Origin: "https://evil.example" })).status, 403);
+    const payload = { draftRevision: task.draftRevision, title: "Поиск", description: "Проверенное описание", answers: ["По подстроке"], branch: "main", repository: "evil/repo" };
+    const confirmed = await (await post(route, payload)).json();
+    assert.equal(confirmed.task.input, source);
+    assert.equal(confirmed.task.repository, f.project.fullName);
+    assert.equal(confirmed.task.branch, `chore/task-${task.id}`);
+    assert.equal(confirmed.task.clarifications[0].answer, "По подстроке");
+    assert.equal((await post(route, payload)).status, 200);
+    const board = await (await fetch(f.origin + `/api/tasks?projectId=${f.project.id}`)).json();
+    assert.equal(board.tasks[0].description, payload.description);
+    assert.equal(f.github.creates, 1);
 });

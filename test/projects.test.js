@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
-const { fixture, sha } = require("./helpers");
+const { fixture, sha, createConfirmed } = require("./helpers");
 const { parseRepositoryUrl } = require("../lib/projects");
 const { TaskStore } = require("../lib/store");
 const { AppError } = require("../lib/errors");
@@ -30,8 +30,8 @@ test("tasks and retries remain isolated in two projects after base changes", asy
     const f = await fixture(t);
     const b = await f.projects.connect({ repositoryId: 202 });
     const request = { projectId: f.project.id, requestId: randomUUID(), title: "Задача A" };
-    const aTask = await f.service.create(request);
-    const bTask = await f.service.create({ projectId: b.id, requestId: randomUUID(), title: "Задача B" });
+    const aTask = await createConfirmed(f.service, request);
+    const bTask = await createConfirmed(f.service, { projectId: b.id, requestId: randomUUID(), title: "Задача B" });
     assert.ok(f.github.refs.has(f.github.key(aTask.branch, 101)));
     assert.ok(f.github.refs.has(f.github.key(bTask.branch, 202)));
     assert.equal(f.service.list(b.id).length, 1);
@@ -83,8 +83,10 @@ test("disconnecting while LLM runs prevents the later GitHub write", async (t) =
     await f.projects.update(f.project.id, { archived: true });
     release();
     const task = await creating;
-    assert.equal(task.state, "branch_error");
-    assert.equal(task.error.code, "project_archived");
+    assert.equal(task.state, "draft_ready");
+    const confirmed = await f.service.confirm(task.id, task);
+    assert.equal(confirmed.state, "branch_error");
+    assert.equal(confirmed.error.code, "project_archived");
     assert.equal(f.github.creates, 0);
 });
 
@@ -104,7 +106,7 @@ test("connect uses a non-main default and rejects archived or empty repositories
 
 test("repository rename uses the same GitHub ID without redirecting tasks", async (t) => {
     const f = await fixture(t);
-    const task = await f.service.create({ projectId: f.project.id, requestId: randomUUID(), title: "Задача" });
+    const task = await createConfirmed(f.service, { projectId: f.project.id, requestId: randomUUID(), title: "Задача" });
     await f.service.save(task, { state: "branch_pending", branchUrl: null });
     const listing = await f.github.listRepositories();
     f.github.listRepositories = async () => listing.map((repo) => repo.id === 101 ? { ...repo, name: "renamed", full_name: "example/renamed" } : repo);

@@ -135,9 +135,9 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                 const body = await readJson(request, 16_384);
                 if (typeof body?.prompt !== "string" || body.prompt.trim().length < 5 || body.prompt.length > 500) throw new AppError(400, "prompt", "Опишите задачу: от 5 до 500 символов.");
                 if (body.projectId) projects.find(body.projectId);
-                const { validateSpecification } = require("./lib/llm");
-                const spec = validateSpecification(await generate(body.prompt, { repository: body.projectId ? projects.find(body.projectId).fullName : null }));
-                json(response, 200, { description: spec.steps.join("\n"), acceptance_criteria: spec.acceptanceCriteria });
+                const { validateDraft } = require("./lib/task-draft");
+                const spec = validateDraft(await generate(body.prompt, { repository: body.projectId ? projects.find(body.projectId).fullName : null }));
+                json(response, 200, spec);
                 return;
             }
             if (request.method === "GET" && route === "/api/tasks") {
@@ -160,10 +160,11 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                 return;
             }
             const projectUpdate = route.match(/^\/api\/projects\/([a-f\d-]{36})$/i);
+            const confirm = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/confirm$/i);
             const retry = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/branch\/retry$/i);
             const move = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/column$/i);
             const projectMutation = request.method === "POST" && ["/api/projects", "/api/github/repositories/resolve"].includes(route);
-            if ((request.method === "POST" && (route === "/api/tasks" || retry || move || projectMutation)) || (request.method === "PATCH" && projectUpdate)) {
+            if ((request.method === "POST" && (route === "/api/tasks" || confirm || retry || move || projectMutation)) || (request.method === "PATCH" && projectUpdate)) {
                 if ((request.headers.origin && request.headers.origin !== origin) ||
                     ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"])) {
                     throw new AppError(403, "origin", "Операция разрешена только со страницы локального приложения.");
@@ -180,7 +181,8 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                     return;
                 }
                 let task;
-                if (retry) task = await tasks.retry(retry[1]);
+                if (confirm) task = await tasks.confirm(confirm[1], body);
+                else if (retry) task = await tasks.retry(retry[1]);
                 else if (move) task = await tasks.move(move[1], body.column);
                 else {
                     if (body.assigneeId != null) workspace.employee(body.assigneeId);

@@ -35,6 +35,7 @@ main {
     display: flex;
     gap: 12px;
     margin-bottom: 30px;
+    flex-wrap: wrap;
 }
 
 .project-panel {
@@ -319,3 +320,16 @@ button:disabled {
     .task-dialog-header { flex-direction: column-reverse; }
     #closeTaskDialog { align-self: flex-end; }
 }
+
+.manual-toggle { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.task-form .manual-toggle input { flex: none; width: auto; }
+.task-form > input { min-width: 180px; }
+.draft-field { display: block; margin: 14px 0; font-weight: 600; }
+.draft-field input, .draft-field textarea {
+    display: block; box-sizing: border-box; width: 100%; min-width: 0;
+    margin-top: 6px; padding: 10px; border: 1px solid #bac4ce; border-radius: 6px;
+    font: inherit; font-weight: 400;
+}
+.draft-field textarea { min-height: 90px; resize: vertical; }
+.task-source { white-space: pre-wrap; overflow-wrap: anywhere; }
+.confirm-task { padding: 10px; margin: 8px 0; cursor: pointer; }

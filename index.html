@@ -30,12 +30,17 @@
         <input
             type="text"
             id="taskInput"
-            aria-label="Название задачи"
+            aria-label="Исходные требования задачи"
             maxlength="500"
             placeholder="Например: Сделать форму логина"
         >
+        <select id="taskTypeSelect" aria-label="Тип задачи">
+            <option value="feature">Новая функция</option><option value="fix">Исправление</option>
+            <option value="tests">Тесты</option><option value="docs">Документация</option>
+        </select>
+        <label class="manual-toggle"><input id="skipAi" type="checkbox"> Без ИИ</label>
         <select id="assigneeSelect" aria-label="Исполнитель задачи"><option value="">Не назначен</option></select>
-        <button id="addTaskButton" disabled>✨ Создать задачу и ветку</button>
+        <button id="addTaskButton" disabled>Подготовить карточку</button>
     </section>
     <p id="connectionStatus" role="status">Подключаемся к серверу…</p>
     <p id="feedback" role="status" aria-live="polite"></p>

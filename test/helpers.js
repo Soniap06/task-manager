@@ -7,7 +7,7 @@ const { ProjectService } = require("../lib/projects");
 const { loadConfig } = require("../lib/config");
 
 const sha = "a".repeat(40);
-const specification = { title: "Форма входа", branch: "feat/login-form", acceptanceCriteria: ["Форма доступна"], steps: ["Добавить поля"] };
+const specification = { title: "Форма входа", description: "Добавить форму входа по исходному запросу.", questions: [] };
 
 function githubStub() {
     return {
@@ -49,4 +49,10 @@ async function fixture(t) {
     return { dir, store, github, service, projects, project, config, generations: () => generations };
 }
 
-module.exports = { fixture, githubStub, specification, sha };
+async function createConfirmed(service, input) {
+    const draft = await service.create(input);
+    if (draft.state === "generation_error") return draft;
+    return service.confirm(draft.id, { title: draft.title, description: draft.description, draftRevision: draft.draftRevision, answers: (draft.questions || []).map(() => "Ответ пользователя") });
+}
+
+module.exports = { fixture, githubStub, specification, sha, createConfirmed };
