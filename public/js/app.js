@@ -1,27 +1,167 @@
-const content=document.getElementById("content"),title=document.getElementById("pageTitle"),toastBox=document.getElementById("toast");
-const routeMap={"/":"board","/team":"team","/events":"events","/profile":"profile","/login":"login"};
-const labels={todo:"TO DO",progress:"IN PROGRESS",review:"REVIEW"};let toastTimer;
-function toast(s){toastBox.textContent=s;toastBox.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastBox.classList.remove("show"),2400)}
-function esc(s=""){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-async function api(url,opt={}){const r=await fetch(url,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(opt.headers||{})},...opt});const d=await r.json().catch(()=>({}));if(r.status===401&&!url.startsWith("/api/auth/")){if(location.pathname!=="/login")location.href="/login";throw Error(d.error||"Требуется вход")};if(!r.ok)throw Error(d.error||"Ошибка API");return d}
-function page(){return routeMap[location.pathname]||"board"}
-async function go(url){history.pushState({},"",url);await render()}
-document.addEventListener("click",async e=>{const a=e.target.closest("a[href]");if(!a||a.origin!==location.origin||e.ctrlKey||e.metaKey)return;const p=new URL(a.href).pathname;if(p==="/logout"){e.preventDefault();try{await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin"})}finally{location.href="/login"}return}if(!routeMap[p])return;e.preventDefault();go(p)});
-window.addEventListener("popstate",render);
-function shell(p){const names={board:"Канбан-доска",team:"Сотрудники",events:"События GitHub",profile:"Профиль",login:"Авторизация"};title.textContent=names[p]||names.board;document.querySelector(".nav-menu").classList.remove("open");document.querySelector(".main-wrap").style.maxWidth=p==="login"?"900px":"1320px"}
-document.getElementById("menuToggle").addEventListener("click",()=>document.getElementById("navMenu").classList.toggle("open"));
-async function render(){const p=page();shell(p);try{if(p==="board")await board();else if(p==="team")await team();else if(p==="events")await events();else if(p==="profile")await profile();else login()}catch(e){content.innerHTML=`<div class="panel"><b>Ошибка загрузки</b><p>${esc(e.message)}. Проверьте, что Node.js-сервер запущен.</p></div>`}}
-function taskHtml(t){const avatar=t.assignee_avatar||"https://api.dicebear.com/9.x/initials/svg?seed=Unassigned";const initials=(t.assignee_name||"NA").split(/\s+/).slice(0,2).map(x=>x[0]||"").join("").toUpperCase();const branch=t.branch?`<span class="tag branch">${esc(t.branch)}</span>`:"";const pr=t.pr_url?`<a class="tag pr" href="${esc(t.pr_url)}" target="_blank" rel="noreferrer">Pull Request</a>`:"";return `<article class="task" draggable="true" data-id="${t.id}"><div class="task-id">#TSK-${String(100+t.id).padStart(3,"0")}</div><h3>${esc(t.title)}</h3>${t.description?`<p class="desc">${esc(t.description)}</p>`:""}<div class="tags">${branch}${pr}${!branch&&!pr?`<span class="tag">Task</span>`:""}</div><div class="task-bottom"><span class="task-date">▢ ${t.status==="todo"?"В работе":t.status==="progress"?"Сегодня":"На проверке"}</span><div class="task-end"><span class="task-count">${t.status==="review"?"✓":"•"}</span><span class="avatar-mini" title="${esc(t.assignee_name||"Не назначен")}">${esc(initials)}</span></div></div><div class="task-actions"><button data-move="-1" data-id="${t.id}" ${t.status==="todo"?"disabled":""}>← Назад</button><button data-move="1" data-id="${t.id}" ${t.status==="review"?"disabled":""}>Далее →</button></div></article>`}
-async function board(){const [allTasks,emps]=await Promise.all([api("/api/tasks"),api("/api/employees")]);let searchText="";const renderBoard=()=>{const tasks=allTasks.filter(t=>(`${t.title} ${t.description||""} ${t.branch||""} ${t.assignee_name||""}`).toLowerCase().includes(searchText.toLowerCase()));const counts={todo:0,progress:0,review:0};tasks.forEach(t=>counts[t.status]++);content.innerHTML=`<div class="quickbar"><form class="quick-form" id="quickTaskForm"><span class="plus">＋</span><input id="quickTaskInput" aria-label="Название задачи" placeholder="Добавить новую задачу... (нажмите Enter или кнопку)" required><button type="submit">Создать задачу</button></form><label class="search-box"><span>⌕</span><input id="taskSearch" placeholder="Поиск по задачам..."></label></div><div class="board">${["todo","progress","review"].map(st=>`<section class="column" data-status="${st}"><div class="colhead"><div class="head-left"><span class="dot"></span><span>${st==="todo"?"TO DO":st==="progress"?"IN PROGRESS":"REVIEW"}</span><span class="count">${counts[st]}</span></div><button class="column-options" type="button" aria-label="Опции колонки">···</button></div><div class="column-cards">${tasks.filter(t=>t.status===st).map(taskHtml).join("")||'<div class="empty">Здесь пока нет задач</div>'}</div><button class="add-column-task" type="button" data-add-status="${st}">＋ Добавить задачу</button></section>`).join("")}</div>`;
-const search=document.getElementById("taskSearch");search.value=searchText;search.addEventListener("input",()=>{searchText=search.value;const q=searchText.toLowerCase();const visibleCounts={todo:0,progress:0,review:0};content.querySelectorAll(".task").forEach(card=>{const t=allTasks.find(x=>x.id===+card.dataset.id);const ok=t&&(`${t.title} ${t.description||""} ${t.branch||""} ${t.assignee_name||""}`).toLowerCase().includes(q);card.style.display=ok?"":"none";if(ok)visibleCounts[t.status]++});content.querySelectorAll(".column").forEach(col=>{col.querySelector(".count").textContent=visibleCounts[col.dataset.status]})});
-document.getElementById("quickTaskForm").addEventListener("submit",async e=>{e.preventDefault();const input=document.getElementById("quickTaskInput"),value=input.value.trim();if(!value)return;try{await api("/api/tasks",{method:"POST",body:JSON.stringify({title:value,status:"todo"})});const fresh=await api("/api/tasks");allTasks.splice(0,allTasks.length,...fresh);searchText="";renderBoard();toast("Задача создана и сохранена")}catch(err){toast(err.message)}});
-content.querySelectorAll("[data-add-status]").forEach(b=>b.onclick=()=>taskModal(emps,b.dataset.addStatus));
-content.querySelectorAll("[data-move]").forEach(b=>b.onclick=async()=>{const t=allTasks.find(x=>x.id===+b.dataset.id),i=["todo","progress","review"].indexOf(t.status)+ +b.dataset.move,st=["todo","progress","review"][i];if(!st)return;try{await api(`/api/tasks/${t.id}`,{method:"PATCH",body:JSON.stringify({status:st})});t.status=st;renderBoard();toast("Статус сохранён в базе")}catch(err){toast(err.message)}});
-content.querySelectorAll(".task").forEach(c=>c.ondragstart=e=>e.dataTransfer.setData("text/plain",c.dataset.id));content.querySelectorAll(".column").forEach(c=>{c.ondragover=e=>{e.preventDefault();c.classList.add("over")};c.ondragleave=()=>c.classList.remove("over");c.ondrop=async e=>{e.preventDefault();c.classList.remove("over");const id=+e.dataTransfer.getData("text/plain"),t=allTasks.find(x=>x.id===id);try{await api(`/api/tasks/${id}`,{method:"PATCH",body:JSON.stringify({status:c.dataset.status})});if(t)t.status=c.dataset.status;renderBoard();toast("Статус сохранён в базе")}catch(err){toast(err.message)}}});};renderBoard()}
-function taskModal(emps,initialStatus="todo"){const bg=document.createElement("div");bg.className="modal-bg";bg.innerHTML=`<form class="modal" id="taskForm"><div class="modalhead"><h2>Новая задача</h2><button type="button" class="btn light" id="close">✕</button></div><div class="field"><label>Название задачи *</label><input name="title" required maxlength="160" placeholder="Например, реализовать авторизацию"></div><div class="field"><label>Техническое задание</label><textarea name="description" rows="4" placeholder="Описание и критерии приёмки"></textarea><div class="modalfoot"><button type="button" class="btn light" id="generateSpec">✨ Сгенерировать ТЗ через Qwen</button></div><small id="aiStatus" role="status"></small></div><div class="field"><label>Исполнитель</label><select name="assignee_id"><option value="">Не назначен</option>${emps.map(e=>`<option value="${e.id}">${esc(e.name)} — ${esc(e.role)}</option>`).join("")}</select></div><div class="field"><label>Ветка Git</label><input name="branch" placeholder="feat/task-name"></div><div class="modalfoot"><button type="button" class="btn light" id="cancel">Отмена</button><button class="btn primary">Создать задачу</button></div></form>`;document.body.append(bg);const close=()=>bg.remove();bg.querySelector("#close").onclick=close;bg.querySelector("#cancel").onclick=close;bg.querySelector("#generateSpec").onclick=async()=>{const prompt=bg.querySelector('[name="title"]').value.trim();const status=bg.querySelector('#aiStatus');if(prompt.length<5){status.textContent="Сначала введите название задачи подробнее.";return}const btn=bg.querySelector('#generateSpec');btn.disabled=true;status.textContent="Qwen составляет техническое задание…";try{const result=await api('/api/ai/generate-task',{method:'POST',body:JSON.stringify({prompt})});bg.querySelector('[name="description"]').value=result.description+"\n\nКритерии приёмки:\n"+result.acceptance_criteria.map(x=>"- "+x).join("\n");status.textContent="ТЗ сгенерировано. Проверьте и отредактируйте его перед сохранением."}catch(err){status.textContent=err.message}finally{btn.disabled=false}};bg.onclick=e=>{if(e.target===bg)close()};bg.querySelector("form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{await api("/api/tasks",{method:"POST",body:JSON.stringify({title:f.get("title"),description:f.get("description"),assignee_id:+f.get("assignee_id")||null,branch:f.get("branch")||null,status:initialStatus})});close();await board();toast("Задача сохранена в SQLite")}catch(x){toast(x.message)}}}
-async function team(){const [es,ts]=await Promise.all([api("/api/employees"),api("/api/tasks")]);content.innerHTML=`<div class="heading"><div><h2>Команда проекта</h2><p>Компетенции и доступная ёмкость участников спринта.</p></div><span class="tag">${es.length} участника</span></div><div class="team">${es.map(e=>{const n=ts.filter(t=>t.assignee_id===e.id).length,inf=e.capacity===null,p=inf?100:Math.min(100,Math.round(n/Math.max(e.capacity,1)*100));return `<article class="employee"><div class="person"><img src="${esc(e.avatar_url)}" alt=""><div><h3>${esc(e.name)}</h3><p>${esc(e.role)}</p></div></div><span class="badge ${e.executor_type==="ai_agent"?"ai":""}">${e.executor_type==="ai_agent"?"✦ AI Agent":"● Человек"}</span><div class="stack">${e.stack.map(s=>`<span class="chip">${esc(s)}</span>`).join("")}</div><div class="capacity"><b>Загрузка спринта</b><span>${inf?"∞":`${n} / ${e.capacity} задач`}</span></div><div class="track"><div class="fill" style="width:${p}%"></div></div><div class="note">${inf?"Нет фиксированного лимита":`Занято ${p}% условной ёмкости`}</div></article>`}).join("")}</div>`}
-function ago(d){const m=Math.floor(Math.max(0,Date.now()-new Date(d).getTime())/60000);return m<1?"Только что":m<60?`${m} мин. назад`:m<1440?`${Math.floor(m/60)} ч. назад`:`${Math.floor(m/1440)} дн. назад`}
-async function events(){const es=await api("/api/events"),names={push:"Push в репозиторий",pull_request:"Pull Request",pull_request_review:"Code Review"},icons={push:"⇧",pull_request:"⑂",pull_request_review:"✓"};content.innerHTML=`<div class="heading"><div><h2>Активность репозитория</h2><p>Последние события GitHub и действия AI-агента.</p></div><span class="tag">${es.length} событий</span></div><div class="events">${es.map(e=>`<article class="event"><div class="event-icon ${e.event_type}">${icons[e.event_type]}</div><div class="event-body"><h3>${names[e.event_type]}</h3><p>${esc(e.payload_summary)}</p></div><time>${ago(e.created_at)}</time></article>`).join("")||"Событий пока нет."}</div>`}
-async function profile(){const p=await api("/api/profile");content.innerHTML=`<div class="heading"><div><h2>Мой профиль</h2><p>Информация об участнике команды.</p></div><button class="btn light" id="edit">✎ Редактировать профиль</button></div><div class="profile-grid"><section class="profile"><div class="profile-main"><img src="${esc(p.avatar_url)}" alt=""><div><h2>${esc(p.name)}</h2><p>${esc(p.role)}</p><span class="badge">● Участник команды</span></div></div><div class="details"><div class="detail"><small>Тип исполнителя</small><b>Человек</b></div><div class="detail"><small>Лимит спринта</small><b>${p.capacity} задач</b></div></div><div class="pstats"><div><strong>${p.stats.in_progress||0}</strong><span>Задач в работе</span></div><div><strong>${p.stats.in_review||0}</strong><span>Задач на ревью</span></div></div></section><section class="panel"><h3>Подтверждённый стек</h3><div class="stack">${p.stack.map(s=>`<span class="chip">${esc(s)}</span>`).join("")}</div><h3>О проекте</h3><p>Единое рабочее пространство для задач, API и событий разработки.</p></section></div>`;document.getElementById("edit").onclick=()=>toast("Редактирование профиля пока демонстрационное")}
-function login(){content.innerHTML=`<div class="login-wrap"><form class="login" id="loginForm"><a class="brand" href="/"><span class="logo">✦</span>TaskFlow</a><h2>С возвращением</h2><p>Войдите, чтобы продолжить работу над проектом.</p><div class="field"><label>Логин</label><input name="username" required autocomplete="username" placeholder="Логин из настроек проекта"></div><div class="field"><label>Пароль</label><input name="password" type="password" required autocomplete="current-password" placeholder="Введите пароль"></div><p id="loginError" class="note" role="alert"></p><button class="btn primary" type="submit">Войти →</button><div class="loginlinks"><span>Демо-доступ настраивается владельцем проекта</span></div></form></div>`;document.getElementById("loginForm").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget),button=e.currentTarget.querySelector('button');button.disabled=true;document.getElementById("loginError").textContent="";try{await api("/api/auth/login",{method:"POST",body:JSON.stringify({username:f.get("username"),password:f.get("password")})});location.href="/"}catch(err){document.getElementById("loginError").textContent=err.message;button.disabled=false}}}
-render();
+const content = document.getElementById("content");
+const pageTitle = document.getElementById("pageTitle");
+const page = location.pathname.slice(1);
+let projectId = new URLSearchParams(location.search).get("projectId") || "";
+try { projectId ||= sessionStorage.getItem("task-manager.active-project.v1") || ""; } catch { /* Необязательный выбор. */ }
+
+function node(tag, text, className) {
+    const element = document.createElement(tag);
+    if (text !== undefined) element.textContent = text;
+    if (className) element.className = className;
+    return element;
+}
+
+async function api(url, options = {}) {
+    const response = await fetch(url, { ...options, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(150_000) });
+    const result = await response.json();
+    if (response.status === 401 && page !== "login") location.assign("/login");
+    if (!response.ok) throw new Error(result.error?.message || "Ошибка API.");
+    return result;
+}
+
+function link(text, href) {
+    const element = node("a", text, "btn light");
+    element.href = href;
+    return element;
+}
+
+function person(employee) {
+    const element = node("div", undefined, "person");
+    const initials = node("span", employee.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join(""), "avatar-mini");
+    const text = node("div");
+    text.append(node("h3", employee.name), node("p", employee.role));
+    element.append(initials, text);
+    return element;
+}
+
+function skills(employee) {
+    const element = node("div", undefined, "stack");
+    for (const skill of employee.stack) element.append(node("span", skill, "chip"));
+    return element;
+}
+
+async function selectProject() {
+    const { projects } = await api("/api/projects");
+    const available = projects.filter((project) => !project.archived);
+    if (!available.some((project) => project.id === projectId)) projectId = available[0]?.id || "";
+    const label = node("label", "Рабочий проект ", "workspace-project");
+    const select = node("select");
+    for (const project of available) {
+        const option = node("option", project.fullName);
+        option.value = project.id;
+        select.append(option);
+    }
+    select.value = projectId;
+    select.disabled = !available.length;
+    label.append(select, link("Настроить проекты", "/projects.html"));
+    content.append(label);
+    select.onchange = () => {
+        projectId = select.value;
+        try { sessionStorage.setItem("task-manager.active-project.v1", projectId); } catch { /* Выбор остаётся на странице. */ }
+        location.assign(`/${page}?projectId=${encodeURIComponent(projectId)}`);
+    };
+    document.querySelector(".project-chip").textContent = available.find((project) => project.id === projectId)?.fullName || "Проект не выбран";
+}
+
+async function team() {
+    const employees = await api("/api/employees");
+    const tasks = projectId ? (await api(`/api/tasks?projectId=${encodeURIComponent(projectId)}`)).tasks : [];
+    const grid = node("div", undefined, "team");
+    for (const employee of employees) {
+        const count = tasks.filter((task) => task.assigneeId === employee.id).length;
+        const card = node("article", undefined, "employee");
+        card.append(person(employee), node("span", employee.executor_type === "ai_agent" ? "✦ AI Agent · выполнение пока не подключено" : "● Человек", "badge"), skills(employee));
+        card.append(node("p", `Назначено задач: ${count}. Ёмкость: ${employee.capacity} ч. за спринт.`, "note"));
+        grid.append(card);
+    }
+    content.append(grid);
+}
+
+async function events() {
+    if (!projectId) { content.append(node("p", "Подключите проект для просмотра событий.")); return; }
+    const records = await api(`/api/events?projectId=${encodeURIComponent(projectId)}`);
+    const list = node("div", undefined, "events");
+    for (const record of records) {
+        const card = node("article", undefined, "event");
+        const text = node("div", undefined, "event-body");
+        text.append(node("h3", record.event_type), node("p", record.payload_summary));
+        const time = node("time", new Date(record.created_at).toLocaleString("ru-RU"));
+        time.dateTime = record.created_at;
+        card.append(text, time);
+        list.append(card);
+    }
+    content.append(records.length ? list : node("p", "Событий пока нет. Они появятся после получения подписанных webhook GitHub."));
+}
+
+async function profile() {
+    const employee = await api(`/api/profile${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`);
+    if (!employee.id) {
+        content.append(node("p", employee.username ? `Для логина «${employee.username}» сотрудник пока не привязан.` : "Вы работаете локально без входа. Для персонального профиля настройте авторизацию."));
+        return;
+    }
+    const card = node("section", undefined, "profile");
+    card.append(person(employee), skills(employee), node("p", `Ёмкость: ${employee.capacity} ч. за спринт.`));
+    card.append(node("p", `В работе: ${employee.stats.in_progress}. На проверке: ${employee.stats.in_review}.`));
+    content.append(card);
+}
+
+async function login() {
+    const status = await api("/api/auth/status");
+    if (!status.enabled) {
+        content.append(node("p", "Сейчас включён локальный режим без авторизации. Вход настраивается через .env."), link("Открыть доску", "/"));
+        return;
+    }
+    const form = node("form", undefined, "login");
+    form.append(node("h2", "Вход в Task Manager"));
+    const username = node("input");
+    username.name = "username";
+    username.autocomplete = "username";
+    username.required = true;
+    const password = node("input");
+    password.name = "password";
+    password.type = "password";
+    password.autocomplete = "current-password";
+    password.required = true;
+    for (const [text, input] of [["Логин", username], ["Пароль", password]]) {
+        const label = node("label", text, "field");
+        label.append(input);
+        form.append(label);
+    }
+    const error = node("p");
+    error.setAttribute("role", "alert");
+    const button = node("button", "Войти", "btn primary");
+    button.type = "submit";
+    form.append(error, button);
+    form.onsubmit = async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        error.textContent = "";
+        try {
+            await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username: username.value, password: password.value }) });
+            location.assign("/");
+        } catch (cause) { error.textContent = cause.message; }
+        finally { button.disabled = false; }
+    };
+    content.append(form);
+}
+
+document.getElementById("menuToggle").onclick = () => document.getElementById("navMenu").classList.toggle("open");
+document.getElementById("logoutLink").onclick = async (event) => {
+    event.preventDefault();
+    try { await api("/api/auth/logout", { method: "POST", body: "{}" }); location.assign("/login"); }
+    catch (error) { content.append(node("p", error.message)); }
+};
+(async () => {
+    pageTitle.textContent = { team: "Сотрудники", events: "События GitHub", profile: "Профиль", login: "Авторизация" }[page] || "Task Manager";
+    const status = await api("/api/auth/status");
+    document.querySelector(".top-user").textContent = status.username || "Локальная команда";
+    document.getElementById("logoutLink").hidden = !status.authenticated;
+    document.getElementById("loginLink").hidden = status.authenticated;
+    if (page === "login") await login();
+    else {
+        await selectProject();
+        if (page === "team") await team();
+        else if (page === "events") await events();
+        else if (page === "profile") await profile();
+    }
+})().catch((error) => content.append(node("p", error.message, "panel")));

@@ -1,151 +1,244 @@
-require('dotenv').config();
-const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const Database = require('better-sqlite3');
-const app = express();
-const PORT = process.env.PORT || 3000;
-const dir = path.join(__dirname, 'data');
-fs.mkdirSync(dir, { recursive: true });
-const db = new Database(path.join(dir, 'task-manager.db'));
-db.pragma('foreign_keys = ON');
-db.exec(`
-CREATE TABLE IF NOT EXISTS employees (
- id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT NOT NULL,
- executor_type TEXT NOT NULL CHECK(executor_type IN ('human','ai_agent')),
- stack TEXT NOT NULL DEFAULT '[]', capacity INTEGER, avatar_url TEXT
-);
-CREATE TABLE IF NOT EXISTS tasks (
- id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
- status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','progress','review')),
- branch TEXT, pr_url TEXT, assignee_id INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY(assignee_id) REFERENCES employees(id) ON DELETE SET NULL
-);
-CREATE TABLE IF NOT EXISTS events (
- id INTEGER PRIMARY KEY AUTOINCREMENT,
- event_type TEXT NOT NULL CHECK(event_type IN ('push','pull_request','pull_request_review')),
- payload_summary TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE TABLE IF NOT EXISTS webhook_deliveries (delivery_id TEXT PRIMARY KEY, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-`);
-function seed() {
- if (db.prepare('SELECT COUNT(*) n FROM employees').get().n) return;
- db.transaction(() => {
-  const emp = db.prepare('INSERT INTO employees(name,role,executor_type,stack,capacity,avatar_url) VALUES(?,?,?,?,?,?)');
-  emp.run('Халикова Карина','Frontend Developer','human',JSON.stringify(['React','Tailwind','UI/UX']),4,'https://api.dicebear.com/9.x/initials/svg?seed=Karina');
-  emp.run('Пескова София','Backend Developer','human',JSON.stringify(['Node.js','SQLite','GitHub API']),4,'https://api.dicebear.com/9.x/initials/svg?seed=Sofia');
-  emp.run('Qwen Code Agent','AI Assistant','ai_agent',JSON.stringify(['Code Review','Auto-Tests','Refactoring']),null,'https://api.dicebear.com/9.x/bottts/svg?seed=Qwen');
-  const task = db.prepare('INSERT INTO tasks(title,description,status,branch,pr_url,assignee_id) VALUES(?,?,?,?,?,?)');
-  task.run('Сделать форму логина','Сверстать Email и пароль. Проверить обязательные поля и переход на доску.','todo',null,null,1);
-  task.run('Подготовить генератор ТЗ','Форма создания задачи с описанием и критериями приёмки.','todo',null,null,3);
-  task.run('Сохранение задач в SQLite','REST API для хранения и обновления статусов.','progress','feat/sqlite-api',null,2);
-  task.run('Карточки команды','Показать участников, роли, стек и загрузку.','progress','feat/team-page',null,1);
-  task.run('Проверить навигацию','Проверить переходы между страницами приложения.','review','feat/navigation','https://github.com/Soniap06/task-manager/pull/1',3);
-  task.run('Подготовить дизайн-токены','Общие цвета, отступы и адаптивная сетка.','review','feat/design-tokens',null,1);
-  const ev = db.prepare('INSERT INTO events(event_type,payload_summary,created_at) VALUES(?,?,?)');
-  const now = Date.now();
-  ev.run('push','Демонстрация: push в ветку feat/auth.',new Date(now-5*60000).toISOString());
-  ev.run('pull_request','Демонстрация: Pull Request #1 открыт.',new Date(now-24*60000).toISOString());
-  ev.run('pull_request_review','Демонстрация: запрошено ревью у Qwen Code Agent.',new Date(now-70*60000).toISOString());
-  ev.run('push','Демонстрация: изменения API задач.',new Date(now-130*60000).toISOString());
- })();
-}
-seed();
-// Repair the old demo placeholder URL in existing local databases too.
-db.prepare("UPDATE tasks SET pr_url='https://github.com/Soniap06/task-manager/pull/1' WHERE pr_url='https://github.com/'").run();
+const http = require("node:http");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { loadConfig, validateGitHub } = require("./lib/config");
+const { GitHubClient } = require("./lib/github");
+const { createLlm } = require("./lib/llm");
+const { TaskStore } = require("./lib/store");
+const { TaskService } = require("./lib/tasks");
+const { ProjectService } = require("./lib/projects");
+const { AppError, publicError } = require("./lib/errors");
+const { readJson, readRaw } = require("./lib/http-json");
+const { createAuth } = require("./lib/auth");
+const { openDatabase } = require("./lib/database");
+const { Workspace } = require("./lib/workspace");
 
-const SESSION_SECRET = process.env.SESSION_SECRET;
-const DEMO_USERNAME = process.env.DEMO_USERNAME;
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD;
-function sign(value) { return crypto.createHmac('sha256', SESSION_SECRET || 'missing-session-secret').update(value).digest('hex'); }
-function safeEqual(a,b) { const aa=Buffer.from(String(a)); const bb=Buffer.from(String(b)); return aa.length===bb.length && crypto.timingSafeEqual(aa,bb); }
-function makeSession(username) { const payload=Buffer.from(JSON.stringify({username,exp:Date.now()+8*60*60*1000})).toString('base64url'); return `${payload}.${sign(payload)}`; }
-function readSession(token) {
- if (!token || !SESSION_SECRET) return null;
- const i=token.lastIndexOf('.'); if(i<1)return null;
- const payload=token.slice(0,i), sig=token.slice(i+1);
- if(!safeEqual(sig,sign(payload)))return null;
- try { const data=JSON.parse(Buffer.from(payload,'base64url').toString()); return data.exp>Date.now()?data:null; } catch { return null; }
+const assets = new Map([
+    ["/", ["index.html", "text/html; charset=utf-8"]],
+    ["/index.html", ["index.html", "text/html; charset=utf-8"]],
+    ["/projects.html", ["projects.html", "text/html; charset=utf-8"]],
+    ["/projects.js", ["projects.js", "text/javascript; charset=utf-8"]],
+    ["/script.js", ["script.js", "text/javascript; charset=utf-8"]],
+    ["/style.css", ["style.css", "text/css; charset=utf-8"]]
+]);
+for (const route of ["/team", "/events", "/profile", "/login"]) assets.set(route, ["public/index.html", "text/html; charset=utf-8"]);
+assets.set("/js/app.js", ["public/js/app.js", "text/javascript; charset=utf-8"]);
+assets.set("/css/style.css", ["public/css/style.css", "text/css; charset=utf-8"]);
+
+async function createApp({ config = loadConfig(), github = new GitHubClient(config.github), generate = createLlm(config.llm), store } = {}) {
+    store = store || await new TaskStore(config.dataDir).open();
+    const projects = new ProjectService(store, github);
+    const tasks = new TaskService(store, github, generate, projects);
+    let database;
+    let workspace;
+    const auth = createAuth(config.auth);
+    try {
+        database = openDatabase(path.join(config.dataDir, "task-manager.sqlite"));
+        workspace = new Workspace(database, store);
+    } catch (error) {
+        database?.close();
+        await store.close();
+        throw error;
+    }
+    try { await tasks.recover(); } catch (error) {
+        database.close();
+        await store.close();
+        throw error;
+    }
+    const json = (response, status, body) => {
+        response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify(body));
+    };
+    const server = http.createServer(async (request, response) => {
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Referrer-Policy", "no-referrer");
+        response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+        try {
+            const port = server.address()?.port;
+            const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
+            if (!allowedHosts.includes(request.headers.host)) throw new AppError(403, "host", "Недопустимый Host.");
+            const origin = `http://${request.headers.host}`;
+            const url = new URL(request.url, origin);
+            if (url.origin !== origin) throw new AppError(403, "host", "Недопустимый адрес запроса.");
+            const route = url.pathname;
+            const mutation = ["POST", "PATCH", "DELETE"].includes(request.method);
+            if (route !== "/api/webhooks/github" && mutation &&
+                ((request.headers.origin && request.headers.origin !== origin) || ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"]))) {
+                throw new AppError(403, "origin", "Операция разрешена только со страницы локального приложения.");
+            }
+            if (request.method === "POST" && route === "/api/webhooks/github") {
+                const result = workspace.webhook(await readRaw(request), request.headers, config.webhookSecret);
+                json(response, result.duplicate ? 200 : 202, result);
+                return;
+            }
+            if (request.method === "GET" && route === "/api/health") {
+                json(response, 200, { ok: true });
+                return;
+            }
+            if (request.method === "GET" && route === "/api/auth/status") {
+                json(response, 200, auth.status(request));
+                return;
+            }
+            if (request.method === "POST" && ["/api/auth/login", "/api/auth/logout"].includes(route)) {
+                if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") throw new AppError(415, "content_type", "Используйте application/json.");
+                const body = await readJson(request, 16_384);
+                if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError(400, "body", "Ожидался объект.");
+                response.setHeader("Set-Cookie", route.endsWith("/login") ? auth.login(body) : auth.logout());
+                json(response, 200, { ok: true });
+                return;
+            }
+            if (route.startsWith("/api/")) auth.require(request);
+            if (request.method === "GET" && assets.has(route)) {
+                const [file, type] = assets.get(route);
+                const content = await fs.readFile(path.join(config.root, file));
+                response.writeHead(200, { "Content-Type": type });
+                response.end(content);
+                return;
+            }
+            if (request.method === "GET" && route === "/api/status") {
+                let configurationError = null;
+                try { validateGitHub(config.github); } catch (error) { configurationError = publicError(error); }
+                json(response, 200, {
+                    installationUrl: /^\d+$/.test(config.github.installationId) ? `https://github.com/settings/installations/${config.github.installationId}` : null,
+                    hasLegacyTasks: store.list().some((task) => !task.projectId),
+                    configured: !configurationError,
+                    error: configurationError
+                });
+                return;
+            }
+            if (request.method === "GET" && route === "/api/employees") {
+                json(response, 200, workspace.employees());
+                return;
+            }
+            const employee = route.match(/^\/api\/employees\/([a-z\d-]+)$/i);
+            if (request.method === "GET" && employee) {
+                json(response, 200, workspace.employee(employee[1]));
+                return;
+            }
+            if (request.method === "GET" && ["/api/profile", "/api/events"].includes(route)) {
+                const projectId = url.searchParams.get("projectId");
+                if (projectId) projects.find(projectId);
+                if (route === "/api/events") {
+                    if (!projectId) throw new AppError(400, "project_required", "Выберите проект для просмотра событий.");
+                    json(response, 200, workspace.events(projectId));
+                } else {
+                    const username = auth.status(request).username;
+                    const selected = username ? workspace.employees().find((item) => item.id === username) : null;
+                    const assigned = selected ? store.list().filter((task) => task.assigneeId === selected.id && (!projectId || task.projectId === projectId)) : [];
+                    json(response, 200, selected ? { ...selected, stats: { in_progress: assigned.filter((task) => task.column === "progress").length, in_review: assigned.filter((task) => task.column === "review").length } } : { username, employee: null });
+                }
+                return;
+            }
+            if (request.method === "POST" && route === "/api/ai/generate-task") {
+                if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") throw new AppError(415, "content_type", "Используйте application/json.");
+                const body = await readJson(request, 16_384);
+                if (typeof body?.prompt !== "string" || body.prompt.trim().length < 5 || body.prompt.length > 500) throw new AppError(400, "prompt", "Опишите задачу: от 5 до 500 символов.");
+                if (body.projectId) projects.find(body.projectId);
+                const { validateDraft } = require("./lib/task-draft");
+                const spec = validateDraft(await generate(body.prompt, { repository: body.projectId ? projects.find(body.projectId).fullName : null }));
+                json(response, 200, spec);
+                return;
+            }
+            if (request.method === "GET" && route === "/api/tasks") {
+                const projectId = url.searchParams.get("projectId");
+                if (!projectId) throw new AppError(400, "project_required", "Выберите проект для просмотра задач.");
+                json(response, 200, { tasks: tasks.list(projectId) });
+                return;
+            }
+            if (request.method === "GET" && route === "/api/projects") {
+                json(response, 200, { projects: projects.list() });
+                return;
+            }
+            if (request.method === "GET" && route === "/api/github/repositories") {
+                json(response, 200, { repositories: await projects.catalog((url.searchParams.get("search") || "").slice(0, 200)) });
+                return;
+            }
+            const branchList = route.match(/^\/api\/github\/repositories\/(\d+)\/branches$/);
+            if (request.method === "GET" && branchList) {
+                json(response, 200, { branches: await projects.branches(Number(branchList[1])) });
+                return;
+            }
+            const projectUpdate = route.match(/^\/api\/projects\/([a-f\d-]{36})$/i);
+            const confirm = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/confirm$/i);
+            const retry = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/branch\/retry$/i);
+            const move = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/column$/i);
+            const projectMutation = request.method === "POST" && ["/api/projects", "/api/github/repositories/resolve"].includes(route);
+            if ((request.method === "POST" && (route === "/api/tasks" || confirm || retry || move || projectMutation)) || (request.method === "PATCH" && projectUpdate)) {
+                if ((request.headers.origin && request.headers.origin !== origin) ||
+                    ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"])) {
+                    throw new AppError(403, "origin", "Операция разрешена только со страницы локального приложения.");
+                }
+                if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") {
+                    throw new AppError(415, "content_type", "Используйте Content-Type: application/json.");
+                }
+                const body = await readJson(request, 16_384);
+                if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError(400, "body", "Ожидался JSON-объект.");
+                if (projectMutation || projectUpdate) {
+                    if (route === "/api/github/repositories/resolve") json(response, 200, { repository: await projects.resolve(body.url) });
+                    else if (projectUpdate) json(response, 200, { project: await projects.update(projectUpdate[1], body) });
+                    else json(response, 200, { project: await projects.connect(body) });
+                    return;
+                }
+                let task;
+                if (confirm) task = await tasks.confirm(confirm[1], body);
+                else if (retry) task = await tasks.retry(retry[1]);
+                else if (move) task = await tasks.move(move[1], body.column);
+                else {
+                    if (body.assigneeId != null) workspace.employee(body.assigneeId);
+                    task = await tasks.create(body);
+                }
+                json(response, 200, { task });
+                return;
+            }
+            throw new AppError(request.method === "GET" ? 404 : 405, "route", "Ресурс или метод недоступен.");
+        } catch (error) {
+            json(response, error instanceof AppError ? error.status : 500, { error: publicError(error) });
+        }
+    });
+    server.requestTimeout = 30_000;
+    server.headersTimeout = 10_000;
+    const close = async () => {
+        if (server.listening) {
+            await new Promise((resolve) => {
+                server.close(resolve);
+                server.closeIdleConnections();
+            });
+        }
+        await tasks.queue;
+        await projects.queue;
+        await store.close();
+        database.close();
+    };
+    return { server, tasks, projects, store, close };
 }
-function cookie(req,name) { const raw=req.headers.cookie||''; const pair=raw.split(';').map(x=>x.trim()).find(x=>x.startsWith(name+'=')); return pair?decodeURIComponent(pair.slice(name.length+1)):''; }
-function requireAuth(req,res,next) {
- const session=readSession(cookie(req,'tm_session'));
- if(!session)return res.status(401).json({error:'Требуется вход. Авторизуйтесь на странице входа.'});
- req.user=session.username; next();
+
+async function main() {
+    const config = loadConfig();
+    const app = await createApp({ config });
+    app.server.once("error", async (error) => {
+        console.error(error.code === "EADDRINUSE" ? "Порт занят. Остановите другой сервер или измените PORT в .env." : "Не удалось запустить HTTP-сервер.");
+        await app.close();
+        process.exitCode = 1;
+    });
+    app.server.listen(config.port, "127.0.0.1", () => {
+        console.log(`Task Manager: http://127.0.0.1:${app.server.address().port}`);
+    });
+    let closing = false;
+    const stop = async () => {
+        if (closing) return;
+        closing = true;
+        await app.close();
+    };
+    process.on("SIGTERM", stop);
+    process.on("SIGINT", stop);
 }
-app.disable('x-powered-by');
-app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');next();});
-// GitHub sends the exact raw body; verify its signature before parsing JSON.
-app.post('/api/webhooks/github', express.raw({type:'application/json',limit:'1mb'}), (req,res)=>{
- const secret=process.env.GITHUB_WEBHOOK_SECRET;
- if(!secret)return res.status(503).json({error:'GITHUB_WEBHOOK_SECRET не настроен'});
- const signature=req.get('x-hub-signature-256')||'';
- const expected='sha256='+crypto.createHmac('sha256',secret).update(req.body).digest('hex');
- if(!/^sha256=[a-f0-9]{64}$/.test(signature)||!safeEqual(signature,expected))return res.status(401).json({error:'Неверная подпись GitHub'});
- const delivery=req.get('x-github-delivery')||crypto.createHash('sha256').update(req.body).digest('hex');
- if(db.prepare('SELECT 1 FROM webhook_deliveries WHERE delivery_id=?').get(delivery))return res.status(200).json({ok:true,duplicate:true});
- let payload; try { payload=JSON.parse(req.body.toString('utf8')); } catch { return res.status(400).json({error:'Некорректный JSON'}); }
- const ghEvent=req.get('x-github-event'); let type,summary;
- if(ghEvent==='push') { type='push'; summary=`Push: ${payload.pusher?.name||payload.sender?.login||'unknown'} в ${payload.ref||'ветку'} — ${payload.head_commit?.message||'обновление коммитов'}`; }
- else if(ghEvent==='pull_request') { type='pull_request'; const pr=payload.pull_request||{}; summary=`Pull Request #${pr.number||payload.number||'?'} ${pr.action||'updated'}: ${pr.title||'без названия'} (${pr.user?.login||payload.sender?.login||'unknown'})`; }
- else if(ghEvent==='pull_request_review') { type='pull_request_review'; const pr=payload.pull_request||{}, review=payload.review||{}; summary=`Review для PR #${pr.number||'?'}: ${review.state||'submitted'} от ${review.user?.login||'unknown'}`; }
- else return res.status(202).json({ok:true,ignored:true,event:ghEvent||'unknown'});
- const tx=db.transaction(()=>{db.prepare('INSERT INTO events(event_type,payload_summary) VALUES(?,?)').run(type,summary);db.prepare('INSERT INTO webhook_deliveries(delivery_id) VALUES(?)').run(delivery);});
- try{tx();return res.status(202).json({ok:true});}catch(e){console.error('Webhook persistence failed',e);return res.status(500).json({error:'Не удалось сохранить событие'});}
-});
-app.use(express.json({limit:'1mb'}));
-app.use(express.static(path.join(__dirname,'public')));
-app.get('/api/health',(req,res)=>res.json({ok:true}));
-app.get('/api/auth/status',(req,res)=>{const s=readSession(cookie(req,'tm_session'));res.json({authenticated:!!s,username:s?.username||null});});
-app.post('/api/auth/login',(req,res)=>{
- if(!SESSION_SECRET||!DEMO_USERNAME||!DEMO_PASSWORD)return res.status(503).json({error:'Настройте SESSION_SECRET, DEMO_USERNAME и DEMO_PASSWORD в .env'});
- const {username,password}=req.body||{};
- if(!safeEqual(username||'',DEMO_USERNAME)||!safeEqual(password||'',DEMO_PASSWORD))return res.status(401).json({error:'Неверный логин или пароль'});
- res.setHeader('Set-Cookie',`tm_session=${encodeURIComponent(makeSession(DEMO_USERNAME))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${process.env.NODE_ENV==='production'?'; Secure':''}`);
- res.json({ok:true,username:DEMO_USERNAME});
-});
-app.post('/api/auth/logout',(req,res)=>{res.setHeader('Set-Cookie',`tm_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV==='production'?'; Secure':''}`);res.json({ok:true});});
-app.use('/api', (req,res,next)=>['/health','/auth/status','/auth/login','/auth/logout','/webhooks/github'].includes(req.path)?next():requireAuth(req,res,next));
-app.get('/api/tasks',(req,res)=>{
- const rows=db.prepare(`SELECT t.*,e.name assignee_name,e.role assignee_role,e.executor_type assignee_type,e.avatar_url assignee_avatar,e.stack assignee_stack FROM tasks t LEFT JOIN employees e ON e.id=t.assignee_id ORDER BY t.id DESC`).all();
- res.json(rows.map(r=>({...r,assignee_stack:r.assignee_stack?JSON.parse(r.assignee_stack):[]})));
-});
-app.post('/api/tasks',(req,res)=>{
- const {title,description='',status='todo',branch=null,pr_url=null,assignee_id=null}=req.body||{};
- if(!title||!String(title).trim())return res.status(400).json({error:'Название задачи обязательно'});
- if(!['todo','progress','review'].includes(status))return res.status(400).json({error:'Недопустимый статус'});
- try {const r=db.prepare('INSERT INTO tasks(title,description,status,branch,pr_url,assignee_id) VALUES(?,?,?,?,?,?)').run(String(title).trim(),String(description),status,branch,pr_url,assignee_id||null);res.status(201).json(db.prepare('SELECT * FROM tasks WHERE id=?').get(r.lastInsertRowid));}
- catch(e){res.status(400).json({error:'Не удалось создать задачу; проверьте исполнителя'});}
-});
-app.patch('/api/tasks/:id',(req,res)=>{
- const id=Number(req.params.id), old=db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
- if(!old)return res.status(404).json({error:'Задача не найдена'});
- const allowed=['title','description','status','branch','pr_url','assignee_id'], u={};
- for(const k of allowed)if(Object.hasOwn(req.body||{},k))u[k]=req.body[k];
- if(u.status&&!['todo','progress','review'].includes(u.status))return res.status(400).json({error:'Недопустимый статус'});
- const keys=Object.keys(u); if(!keys.length)return res.json(old);
- try {db.prepare(`UPDATE tasks SET ${keys.map(k=>k+'=@'+k).join(',')} WHERE id=@id`).run({...u,id});res.json(db.prepare('SELECT * FROM tasks WHERE id=?').get(id));}
- catch(e){res.status(400).json({error:'Не удалось обновить задачу; проверьте данные'});}
-});
-app.get('/api/employees',(req,res)=>res.json(db.prepare('SELECT * FROM employees ORDER BY id').all().map(e=>({...e,stack:JSON.parse(e.stack)}))));
-app.get('/api/employees/:id',(req,res)=>{const e=db.prepare('SELECT * FROM employees WHERE id=?').get(Number(req.params.id));if(!e)return res.status(404).json({error:'Сотрудник не найден'});res.json({...e,stack:JSON.parse(e.stack)});});
-app.get('/api/profile',(req,res)=>{const e=db.prepare('SELECT * FROM employees WHERE id=2').get();const stats=db.prepare("SELECT SUM(CASE WHEN status='progress' AND assignee_id=2 THEN 1 ELSE 0 END) in_progress,SUM(CASE WHEN status='review' AND assignee_id=2 THEN 1 ELSE 0 END) in_review FROM tasks").get();res.json({...e,stack:JSON.parse(e.stack),stats});});
-app.get('/api/events',(req,res)=>res.json(db.prepare('SELECT * FROM events ORDER BY datetime(created_at) DESC,id DESC LIMIT 100').all()));
-app.post('/api/ai/generate-task',(req,res,next)=>{
- (async()=>{
-  const apiKey=process.env.QWEN_API_KEY; if(!apiKey)return res.status(503).json({error:'Добавьте QWEN_API_KEY в .env'});
-  const prompt=String(req.body?.prompt||'').trim(); if(prompt.length<5)return res.status(400).json({error:'Опишите задачу подробнее (минимум 5 символов)'});
-  const base=(process.env.QWEN_BASE_URL||'https://dashscope-intl.aliyuncs.com/compatible-mode/v1').replace(/\/$/,'');
-  const response=await fetch(`${base}/chat/completions`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.QWEN_MODEL||'qwen-plus',temperature:0.3,messages:[{role:'system',content:'Ты опытный технический руководитель. Составь краткое, конкретное ТЗ на русском языке. Верни только JSON с полями description (требования и шаги) и acceptance_criteria (массив критериев приёмки). Не придумывай бизнес-контекст, которого нет в запросе.'},{role:'user',content:prompt}]})});
-  const data=await response.json().catch(()=>({})); if(!response.ok){console.error('Qwen API error',response.status,data);return res.status(502).json({error:'Qwen API вернул ошибку. Проверьте ключ, модель и доступ к API.'});}
-  let content=data.choices?.[0]?.message?.content||''; content=content.replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,'');
-  let result;try{result=JSON.parse(content);}catch{return res.status(502).json({error:'Qwen вернул ответ не в ожидаемом JSON-формате'});}
-  if(typeof result.description!=='string'||!Array.isArray(result.acceptance_criteria))return res.status(502).json({error:'Qwen вернул неполное ТЗ'});
-  return res.json({description:result.description,acceptance_criteria:result.acceptance_criteria});
- })().catch(next);
-});
-app.post('/api/events',(req,res)=>{const {event_type,payload_summary}=req.body||{};if(!['push','pull_request','pull_request_review'].includes(event_type)||!payload_summary)return res.status(400).json({error:'Некорректное событие'});const r=db.prepare('INSERT INTO events(event_type,payload_summary) VALUES(?,?)').run(event_type,payload_summary);res.status(201).json(db.prepare('SELECT * FROM events WHERE id=?').get(r.lastInsertRowid));});
-app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-app.use((err,req,res,next)=>{console.error(err);res.status(500).json({error:'Внутренняя ошибка сервера'});});
-app.listen(PORT,()=>console.log(`Task Manager: http://localhost:${PORT}`));
+
+if (require.main === module) {
+    main().catch((error) => {
+        console.error(publicError(error).message);
+        process.exitCode = 1;
+    });
+}
+
+module.exports = { createApp };
