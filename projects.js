@@ -149,7 +149,7 @@ byId("connectRepoButton").addEventListener("click", async () => {
     try {
         const { project } = await api("/api/projects", { method: "POST", body: JSON.stringify({ repositoryId: selectedRepository.repositoryId, baseBranch: byId("baseBranchInput").value }) });
         byId("connectPanel").open = false;
-        feedback.textContent = `Подключён ${project.fullName}. Ветки появятся при создании задач.`;
+        feedback.textContent = `Подключён ${project.fullName}. Ветки появятся после подтверждения карточек.`;
         await refreshProjects(project.id);
     } catch (error) { showError(error); }
     finally { byId("connectRepoButton").disabled = !selectedRepository || selectedRepository.archived; }

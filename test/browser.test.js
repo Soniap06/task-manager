@@ -101,6 +101,7 @@ test("board search and drag/drop preserve project tasks and only request a statu
     f.nodes.taskSearch.value = "Форма";
     f.nodes.taskSearch.listeners.input();
     assert.equal(f.nodes.todo.children.length, 1);
+    assert.equal(f.nodes.todoCount.textContent, "1");
     f.nodes.taskSearch.value = "";
     f.nodes.taskSearch.listeners.input();
     assert.equal(f.nodes.todo.children.length, 2);
@@ -109,6 +110,7 @@ test("board search and drag/drop preserve project tasks and only request a statu
     assert.equal(mutation.url, "/api/tasks/task-1/column");
     assert.equal(mutation.body.column, "review");
     assert.equal(f.nodes.review.children.length, 1);
+    assert.equal(f.nodes.reviewCount.textContent, "1");
 });
 
 test("saved tasks resolve a matching pending draft in their own project", async () => {

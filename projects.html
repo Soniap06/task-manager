@@ -4,29 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Проекты — Task Manager</title>
+    <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="workspace-page">
 
-<header>
-    <h1>Task Manager ✨</h1>
-    <p>Управление задачами проекта</p>
-    <nav class="site-nav" aria-label="Основная навигация">
-        <a href="index.html">Доска задач</a>
-        <a href="projects.html" aria-current="page">Проекты</a>
-        <a href="/team">Сотрудники</a>
-        <a href="/events">События</a>
-        <a href="/profile">Профиль</a>
-        <a href="/login">Вход</a>
-    </nav>
-</header>
+<nav class="topnav" aria-label="Верхняя панель">
+    <div class="top-left">
+        <details class="workspace-menu">
+            <summary class="menu-toggle" aria-label="Открыть меню">☰</summary>
+            <nav class="nav-menu" aria-label="Основная навигация">
+                <a href="index.html" >Канбан-доска</a>
+                <a href="projects.html" aria-current="page">Проекты</a>
+                <a href="/team">Сотрудники</a>
+                <a href="/events">События GitHub</a>
+                <a href="/profile">Профиль</a>
+                <a href="/login">Вход</a>
+            </nav>
+        </details>
+        <a class="brand" href="index.html">Task Manager</a>
+    </div>
+    <a class="top-user" href="/profile"><span class="top-initials" aria-hidden="true">TM</span><span>Рабочее пространство</span></a>
+</nav>
 
-<main class="projects-page">
-    <h2>Проекты и репозитории</h2>
-    <p>Подключите репозиторий и выберите проект, с которым хотите работать на доске.</p>
+<main class="main-wrap projects-page">
+    <div class="page-top">
+        <div><span class="eyebrow">TASKFLOW WORKSPACE</span><h1>Проекты</h1></div>
+        <span class="project-chip"><i aria-hidden="true"></i> Подключения GitHub</span>
+    </div>
+    <p class="page-intro">Подключите репозиторий и выберите проект, с которым будете работать на доске.</p>
     <p id="connectionStatus" role="status">Подключаемся к серверу…</p>
     <p id="feedback" role="status" aria-live="polite"></p>
+    <div class="projects-layout">
     <section class="project-panel" aria-label="Рабочий проект">
+        <div class="panel-heading"><span class="panel-icon" aria-hidden="true">▦</span><div><h2>Рабочий проект</h2><p>Репозиторий и настройки его доски</p></div></div>
         <label for="projectSelect">Проект и репозиторий</label>
         <select id="projectSelect"><option value="">Подключите проект</option></select>
         <p id="projectInfo"></p>
@@ -34,8 +45,10 @@
         <input id="projectBaseInput" maxlength="200" placeholder="Базовая ветка">
         <button id="saveBaseButton" type="button" disabled>Сохранить базу</button>
         <button id="archiveProjectButton" type="button" disabled>Отключить проект</button>
-        <details id="connectPanel">
-            <summary>Подключить существующий репозиторий</summary>
+        <a class="board-link btn primary" id="openBoardLink" href="index.html">Открыть доску задач →</a>
+    </section>
+    <details class="project-panel connect-panel" id="connectPanel" open>
+            <summary>Подключить репозиторий <span aria-hidden="true">＋</span></summary>
             <p>Выберите репозиторий, доступный GitHub App, или вставьте GitHub-ссылку.</p>
             <button id="loadReposButton" type="button">Обновить репозитории App</button>
             <a id="installationLink" target="_blank" rel="noopener noreferrer" hidden>Настроить доступ на GitHub</a>
@@ -50,9 +63,9 @@
             <input id="baseBranchInput" maxlength="200" list="repositoryBranches" placeholder="Основная ветка репозитория">
             <datalist id="repositoryBranches"></datalist>
             <button id="connectRepoButton" type="button" disabled>Подключить</button>
-        </details>
-    </section>
-    <a class="board-link" id="openBoardLink" href="index.html">Открыть доску задач →</a>
+    </details>
+    </div>
+    <footer>Task Manager · учебный проект по технологиям программирования</footer>
 </main>
 <script src="projects.js"></script>
 </body>

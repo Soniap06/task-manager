@@ -4,66 +4,81 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Task Manager</title>
+    <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="workspace-page">
 
-<header>
-    <h1>Task Manager ✨</h1>
-    <p>Управление задачами проекта</p>
-    <nav class="site-nav" aria-label="Основная навигация">
-        <a href="index.html" aria-current="page">Доска задач</a>
-        <a href="projects.html">Проекты</a>
-        <a href="/team">Сотрудники</a>
-        <a href="/events">События</a>
-        <a href="/profile">Профиль</a>
-        <a href="/login">Вход</a>
-    </nav>
-</header>
+<nav class="topnav" aria-label="Верхняя панель">
+    <div class="top-left">
+        <details class="workspace-menu">
+            <summary class="menu-toggle" aria-label="Открыть меню">☰</summary>
+            <nav class="nav-menu" aria-label="Основная навигация">
+                <a href="index.html" aria-current="page">Канбан-доска</a>
+                <a href="projects.html" >Проекты</a>
+                <a href="/team">Сотрудники</a>
+                <a href="/events">События GitHub</a>
+                <a href="/profile">Профиль</a>
+                <a href="/login">Вход</a>
+            </nav>
+        </details>
+        <a class="brand" href="index.html">Task Manager</a>
+    </div>
+    <a class="top-user" href="/profile"><span class="top-initials" aria-hidden="true">TM</span><span>Рабочее пространство</span></a>
+</nav>
 
-<main>
+<main class="main-wrap">
+    <div class="page-top">
+        <div><span class="eyebrow">TASKFLOW WORKSPACE</span><h1>Канбан-доска</h1></div>
+        <span class="project-chip"><i aria-hidden="true"></i> Задачи вашего проекта</span>
+    </div>
     <section class="board-project" aria-label="Текущий проект">
         <div><span>Текущий проект</span><p id="projectInfo">Загружаем проект…</p></div>
         <a href="projects.html">Выбрать или настроить проект →</a>
     </section>
-    <section class="task-form">
-        <input
-            type="text"
-            id="taskInput"
-            aria-label="Исходные требования задачи"
-            maxlength="500"
-            placeholder="Например: Сделать форму логина"
-        >
-        <select id="taskTypeSelect" aria-label="Тип задачи">
-            <option value="feature">Новая функция</option><option value="fix">Исправление</option>
-            <option value="tests">Тесты</option><option value="docs">Документация</option>
-        </select>
-        <label class="manual-toggle"><input id="skipAi" type="checkbox"> Без ИИ</label>
-        <select id="assigneeSelect" aria-label="Исполнитель задачи"><option value="">Не назначен</option></select>
-        <button id="addTaskButton" disabled>Подготовить карточку</button>
+    <section class="task-form" aria-label="Новая задача">
+        <div class="quick-form">
+            <span class="plus" aria-hidden="true">＋</span>
+            <input type="text" id="taskInput" aria-label="Исходные требования задачи" maxlength="500" placeholder="Что нужно сделать? Например: добавить поиск привычек">
+            <button id="addTaskButton" disabled>Подготовить карточку</button>
+        </div>
+        <div class="task-options">
+            <label>Тип задачи
+                <select id="taskTypeSelect" aria-label="Тип задачи">
+                    <option value="feature">Новая функция</option><option value="fix">Исправление</option>
+                    <option value="tests">Тесты</option><option value="docs">Документация</option>
+                </select>
+            </label>
+            <label>Исполнитель
+                <select id="assigneeSelect" aria-label="Исполнитель задачи"><option value="">Не назначен</option></select>
+            </label>
+            <label class="manual-toggle"><input id="skipAi" type="checkbox"> Без ИИ</label>
+        </div>
     </section>
     <p id="connectionStatus" role="status">Подключаемся к серверу…</p>
     <p id="feedback" role="status" aria-live="polite"></p>
-    <label for="taskSearch">Поиск по задачам</label>
-    <input id="taskSearch" type="search" placeholder="Название, описание или ветка">
-    <button id="refreshButton" type="button">Обновить доску</button>
+    <div class="board-toolbar">
+        <label class="search-box"><span aria-hidden="true">⌕</span><span class="visually-hidden">Поиск по задачам</span><input id="taskSearch" type="search" aria-label="Поиск по задачам" placeholder="Поиск задач, описаний и веток"></label>
+        <button id="refreshButton" class="btn light" type="button">↻ Обновить доску</button>
+    </div>
 
     <section class="board">
-        <div class="column">
-            <h2>To Do</h2>
-            <div class="task-list" id="todo"></div>
+        <div class="column" data-status="todo">
+            <h2 class="colhead"><span class="head-left"><span class="dot" aria-hidden="true"></span>TO DO</span><span class="count" id="todoCount">0</span></h2>
+            <div class="task-list column-cards" id="todo"></div>
         </div>
 
-        <div class="column">
-            <h2>In Progress</h2>
-            <div class="task-list" id="progress"></div>
+        <div class="column" data-status="progress">
+            <h2 class="colhead"><span class="head-left"><span class="dot" aria-hidden="true"></span>IN PROGRESS</span><span class="count" id="progressCount">0</span></h2>
+            <div class="task-list column-cards" id="progress"></div>
         </div>
 
-        <div class="column">
-            <h2>Review</h2>
-            <div class="task-list" id="review"></div>
+        <div class="column" data-status="review">
+            <h2 class="colhead"><span class="head-left"><span class="dot" aria-hidden="true"></span>REVIEW</span><span class="count" id="reviewCount">0</span></h2>
+            <div class="task-list column-cards" id="review"></div>
         </div>
     </section>
+    <footer>Task Manager · учебный проект по технологиям программирования</footer>
 </main>
 
 <dialog id="taskDialog" aria-labelledby="taskDialogTitle">

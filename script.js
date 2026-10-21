@@ -194,6 +194,7 @@ function renderBoard() {
         card.appendChild(buttons);
         byId(columns.includes(task.column) ? task.column : "todo").appendChild(card);
     }
+    for (const column of columns) byId(`${column}Count`).textContent = String(byId(column).children.length);
     if (byId("taskDialog").open) renderTaskDetails();
 }
 
