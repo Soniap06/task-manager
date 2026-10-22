@@ -27,10 +27,12 @@ function browser(handler, draft = null, page = "index", search = "") {
     const storage = new Map(draft ? [[draftKey(draft.projectId), JSON.stringify(draft)]] : []);
     const session = new Map();
     const calls = [];
+    const intervals = [];
     const context = vm.createContext({
         document: { getElementById: (id) => nodes[id], createElement: (tag) => new Element(tag) },
         localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
         sessionStorage: { getItem: (key) => session.get(key) ?? null, setItem: (key, value) => session.set(key, value) },
+        setInterval: (callback) => intervals.push(callback),
         crypto: { randomUUID }, AbortSignal, URLSearchParams, location: { search },
         fetch: async (url, options) => {
             calls.push({ url, options });
@@ -42,7 +44,7 @@ function browser(handler, draft = null, page = "index", search = "") {
         }
     });
     vm.runInContext(fs.readFileSync(require.resolve(page === "index" ? "../script.js" : "../projects.js"), "utf8"), context);
-    return { nodes, storage, session, context, calls };
+    return { nodes, storage, session, context, calls, intervals };
 }
 const task = (patch = {}) => ({ ...specification, branch: "feat/example", projectId: projectA.id, repository: projectA.fullName, id: "task-1", column: "todo", state: "branch_created", branchUrl: "https://github.com/example/books/tree/feat/example", ...patch });
 
@@ -307,4 +309,41 @@ test("AI failure leaves editable manual draft, and failed confirmation preserves
     assert.equal(nodes.find((node) => node.dataset.editor === "description").value, "Мой текст <script>");
     assert.ok(nodes.some((node) => node.textContent?.startsWith("Нет ответа сервера.")));
     assert.equal(f.nodes.addTaskButton.disabled, false);
+});
+
+test("shared board polls other-client changes and preserves an open editor", async () => {
+    let tasks = [task()];
+    const f = browser(async () => ({ tasks }));
+    await tick();
+    tasks = [task({ column: "review" })];
+    await f.intervals[0]();
+    assert.equal(f.nodes.review.children.length, 1);
+    f.nodes.taskDialog.open = true;
+    tasks = [];
+    const count = f.calls.length;
+    await f.intervals[0]();
+    assert.equal(f.calls.length, count);
+    assert.equal(f.nodes.review.children.length, 1);
+    f.nodes.taskDialog.open = false;
+    await f.intervals[0]();
+    assert.equal(f.nodes.review.children.length, 0);
+    assert.equal(f.calls.filter((call) => call.options.method === "POST").length, 0);
+});
+
+test("a late poll cannot overwrite the editor opened while the request was pending", async () => {
+    let release;
+    let pending = false;
+    const f = browser(async () => {
+        if (pending) return new Promise((resolve) => { release = resolve; });
+        return { tasks: [task()] };
+    });
+    await tick();
+    pending = true;
+    const request = f.intervals[0]();
+    await tick();
+    f.nodes.taskDialog.open = true;
+    release({ tasks: [] });
+    await request;
+    assert.equal(f.nodes.todo.children.length, 1);
+    assert.equal(f.nodes.taskDialog.open, true);
 });

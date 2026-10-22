@@ -26,12 +26,15 @@ assets.set("/js/app.js", ["public/js/app.js", "text/javascript; charset=utf-8"])
 assets.set("/css/style.css", ["public/css/style.css", "text/css; charset=utf-8"]);
 
 async function createApp({ config = loadConfig(), github = new GitHubClient(config.github), generate = createLlm(config.llm), store } = {}) {
+    if (config.sharedOrigin && (!config.auth?.username || !config.auth?.password || (config.auth?.secret || "").length < 32)) {
+        throw new AppError(500, "shared_configuration", "Для общей доски требуется полностью настроенный вход.");
+    }
     store = store || await new TaskStore(config.dataDir).open();
     const projects = new ProjectService(store, github);
     const tasks = new TaskService(store, github, generate, projects);
     let database;
     let workspace;
-    const auth = createAuth(config.auth);
+    const auth = createAuth({ ...config.auth, secure: Boolean(config.sharedOrigin) });
     try {
         database = openDatabase(path.join(config.dataDir, "task-manager.sqlite"));
         workspace = new Workspace(database, store);
@@ -57,14 +60,15 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
         try {
             const port = server.address()?.port;
             const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
+            if (config.sharedOrigin) allowedHosts.push(new URL(config.sharedOrigin).host);
             if (!allowedHosts.includes(request.headers.host)) throw new AppError(403, "host", "Недопустимый Host.");
-            const origin = `http://${request.headers.host}`;
+            const origin = config.sharedOrigin || `http://${request.headers.host}`;
             const url = new URL(request.url, origin);
             if (url.origin !== origin) throw new AppError(403, "host", "Недопустимый адрес запроса.");
             const route = url.pathname;
             const mutation = ["POST", "PATCH", "DELETE"].includes(request.method);
             if (route !== "/api/webhooks/github" && mutation &&
-                ((request.headers.origin && request.headers.origin !== origin) || ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"]))) {
+                ((config.sharedOrigin && request.headers.origin !== origin) || (request.headers.origin && request.headers.origin !== origin) || ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"]))) {
                 throw new AppError(403, "origin", "Операция разрешена только со страницы локального приложения.");
             }
             if (request.method === "POST" && route === "/api/webhooks/github") {
@@ -222,7 +226,7 @@ async function main() {
         process.exitCode = 1;
     });
     app.server.listen(config.port, "127.0.0.1", () => {
-        console.log(`Task Manager: http://127.0.0.1:${app.server.address().port}`);
+        console.log(`Task Manager: ${config.sharedOrigin || `http://127.0.0.1:${app.server.address().port}`}`);
     });
     let closing = false;
     const stop = async () => {
