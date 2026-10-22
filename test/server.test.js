@@ -196,3 +196,49 @@ test("HTTP: confirmation is explicit, scoped, validates answers and remains idem
     assert.equal(board.tasks[0].description, payload.description);
     assert.equal(f.github.creates, 1);
 });
+
+test("HTTP: shared HTTPS access requires login and canonical Origin; two clients use one board", async (t) => {
+    const sharedOrigin = "https://karina.example-tail.ts.net";
+    const f = await start(t, { sharedOrigin, auth: { username: "team", password: "test-pass", secret: "s".repeat(32) } });
+    const baseHeaders = { Host: new URL(sharedOrigin).host, Origin: sharedOrigin, "Content-Type": "application/json" };
+    const request = (route, body, cookie) => fetch(f.origin + route, { method: "POST", headers: { ...baseHeaders, ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) });
+    assert.equal((await fetch(f.origin + "/api/projects", { headers: baseHeaders })).status, 401);
+    const login = async () => {
+        const response = await request("/api/auth/login", { username: "team", password: "test-pass" });
+        assert.equal(response.status, 200);
+        const cookie = response.headers.get("set-cookie");
+        assert.match(cookie, /; Secure/);
+        return cookie.split(";")[0];
+    };
+    const karina = await login();
+    const sofia = await login();
+    const created = await request("/api/tasks", { projectId: f.project.id, requestId: randomUUID(), title: "Общая задача", useAi: false }, karina);
+    assert.equal(created.status, 200);
+    const { task } = await created.json();
+    const moved = await request(`/api/tasks/${task.id}/column`, { column: "review" }, sofia);
+    assert.equal(moved.status, 200);
+    const board = await (await fetch(f.origin + `/api/tasks?projectId=${f.project.id}`, { headers: { ...baseHeaders, Cookie: karina } })).json();
+    assert.equal(board.tasks[0].column, "review");
+    assert.equal(board.tasks[0].id, task.id);
+    assert.equal(f.github.creates, 0);
+    for (const origin of ["https://evil.test", "", f.origin]) {
+        const headers = { ...baseHeaders, Cookie: karina };
+        if (origin) headers.Origin = origin;
+        else delete headers.Origin;
+        assert.equal((await fetch(f.origin + "/api/auth/logout", { method: "POST", headers, body: "{}" })).status, 403);
+    }
+    const hostStatus = (host) => new Promise((resolve, reject) => {
+        http.get(f.origin + "/api/projects", { headers: { Host: host, Cookie: karina } }, (response) => {
+            response.resume();
+            resolve(response.statusCode);
+        }).on("error", reject);
+    });
+    assert.equal(await hostStatus("evil.test"), 403);
+    assert.equal(await hostStatus(new URL(sharedOrigin).host), 200);
+    const logout = await request("/api/auth/logout", {}, karina);
+    assert.match(logout.headers.get("set-cookie"), /; Secure/);
+});
+
+test("HTTP: shared mode cannot start without authentication", async () => {
+    await assert.rejects(createApp({ config: { ...require("../lib/config").loadConfig({}), sharedOrigin: "https://karina.example-tail.ts.net" } }), { code: "shared_configuration" });
+});

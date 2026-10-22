@@ -85,12 +85,13 @@ async function selectProject(id) {
     await refreshBoard();
 }
 
-async function refreshBoard() {
+async function refreshBoard({ background = false } = {}) {
     const version = ++boardVersion;
     const projectId = activeProjectId;
     if (!projectId) { boardTasks = []; renderBoard(); return; }
     const { tasks } = await api(`/api/tasks?projectId=${encodeURIComponent(projectId)}`);
-    if (version !== boardVersion || projectId !== activeProjectId) return;
+    if (version !== boardVersion || projectId !== activeProjectId || (background && (busy || document.hidden || byId("taskDialog").open))) return;
+    if (background && JSON.stringify(boardTasks) === JSON.stringify(tasks)) return;
     boardTasks = tasks;
     const draft = getDraft(projectId);
     if (draft && tasks.some((task) => task.requestId === draft.requestId)) {
@@ -131,6 +132,7 @@ async function addTask() {
         return;
     }
     busy = true;
+    boardVersion++;
     feedback.textContent = `Подготавливаем черновик для ${project.fullName}. Ветка появится после подтверждения.`;
     updateControls();
     try {
@@ -153,6 +155,7 @@ async function addTask() {
 async function updateTask(task, action, body = {}) {
     if (busy) return;
     busy = true;
+    boardVersion++;
     updateControls();
     try {
         const { task: result } = await api(`/api/tasks/${task.id}/${action}`, { method: "POST", body: JSON.stringify(body) });
@@ -305,3 +308,17 @@ for (const column of columns) {
 }
 refreshProjects().catch(showError);
 loadEmployees().catch(showError);
+
+// Общая доска получает изменения другого браузера, не трогая открытый редактор.
+let backgroundRefresh = false;
+async function syncBoard() {
+    if (backgroundRefresh || busy || !activeProjectId || document.hidden || byId("taskDialog").open) return;
+    backgroundRefresh = true;
+    try {
+        await refreshBoard({ background: true });
+        if (feedback.textContent === "Нет связи с общей доской. Повторяем подключение…") feedback.textContent = "";
+    } catch {
+        if (!feedback.textContent) feedback.textContent = "Нет связи с общей доской. Повторяем подключение…";
+    } finally { backgroundRefresh = false; }
+}
+setInterval(syncBoard, 5000);

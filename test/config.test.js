@@ -48,3 +48,14 @@ test("provider-specific sampling options can be removed in the editable AI file"
     await f.write({ ...defaults, generation });
     assert.deepEqual(loadConfig({}, f.root).llm.generation, generation);
 });
+
+test("shared mode accepts only a canonical Tailscale HTTPS origin and complete authentication", () => {
+    const env = { SHARED_ORIGIN: "https://karina.example-tail.ts.net", DEMO_USERNAME: "team", DEMO_PASSWORD: "test-pass", SESSION_SECRET: "s".repeat(32) };
+    assert.equal(loadConfig(env).sharedOrigin, env.SHARED_ORIGIN);
+    for (const origin of ["http://karina.example-tail.ts.net", "https://evil.test", "https://karina.example-tail.ts.net/", "https://user:secret@karina.example-tail.ts.net", "https://karina.example-tail.ts.net/path"]) {
+        assert.throws(() => loadConfig({ ...env, SHARED_ORIGIN: origin }), { code: "shared_configuration" });
+    }
+    for (const field of ["DEMO_USERNAME", "DEMO_PASSWORD", "SESSION_SECRET"]) {
+        assert.throws(() => loadConfig({ ...env, [field]: "" }), { code: "shared_configuration" });
+    }
+});
