@@ -4,6 +4,7 @@ const addTaskButton = byId("addTaskButton");
 const connectionStatus = byId("connectionStatus");
 const feedback = byId("feedback");
 const columns = ["todo", "progress", "review"];
+const taskTypeLabels = { feature: "Новая функция", fix: "Исправление", tests: "Тесты", docs: "Документация" };
 const draftPrefix = "task-manager.pending-create.v2:";
 const stateLabels = { draft_ready: "Черновик — проверьте перед созданием ветки", clarification_required: "Нужны ответы на уточняющие вопросы", generating: "Подготовка черновика не завершена", generation_error: "ИИ недоступен или вернул ошибку — можно заполнить вручную", branch_pending: "Создание ветки не завершено", branch_error: "Ошибка создания ветки", branch_created: "Ветка создана в GitHub" };
 let configured = false;
@@ -27,6 +28,7 @@ async function loadEmployees() {
         option.value = employee.id;
         select.appendChild(option);
     }
+    if (byId("taskDialog").open) renderTaskDetails();
 }
 
 function element(tag, className, text) {
@@ -208,6 +210,8 @@ function renderTaskDetails() {
     const content = byId("taskDialogContent");
     content.replaceChildren();
     content.appendChild(element("div", "task-status", task.repository));
+    content.appendChild(element("p", "", `Тип задачи: ${Object.hasOwn(taskTypeLabels, task.type) ? taskTypeLabels[task.type] : "Не указан"}`));
+    content.appendChild(element("p", "", `Исполнитель: ${task.assigneeId ? employees.find((employee) => employee.id === task.assigneeId)?.name || task.assigneeId : "Не назначен"}`));
     const branch = element("div", "task-branch");
     if (task.state === "branch_created" && task.branchUrl?.startsWith("https://github.com/")) {
         const link = element("a", "", task.branch);
@@ -218,7 +222,6 @@ function renderTaskDetails() {
     } else branch.textContent = task.branch ? `Ветка: ${task.branch}` : "Ветка будет создана после подтверждения карточки";
     content.appendChild(branch);
     content.appendChild(element("div", "task-status", task.legacyUnlinked ? "Нужна подтверждённая привязка к проекту" : stateLabels[task.state] || task.state));
-    if (task.assigneeId) content.appendChild(element("p", "", `Исполнитель: ${employees.find((employee) => employee.id === task.assigneeId)?.name || task.assigneeId}`));
     if (task.error) content.appendChild(element("div", "task-error", task.error.message));
     if (taskActionErrors.has(task.id)) content.appendChild(element("p", "task-error", taskActionErrors.get(task.id)));
     const details = element("div", "task-details");
