@@ -219,8 +219,8 @@ test("board hides task details until opening the accessible task dialog", async 
     assert.equal(f.nodes.taskDialogTitle.textContent, item.title);
     const content = f.nodes.taskDialogContent;
     assert.equal(content.children[0].textContent, item.repository);
-    assert.equal(content.children[1].children[0].href, item.branchUrl);
-    const details = content.children[3];
+    assert.equal(content.children.find((node) => node.className === "task-branch").children[0].href, item.branchUrl);
+    const details = content.children.find((node) => node.className === "task-details");
     assert.ok(details.children.some((node) => node.tag === "ul" && node.children[0].textContent === "<b>Критерий</b>"));
     assert.ok(details.children.some((node) => node.tag === "ol" && node.children[0].textContent === "Первый шаг"));
     f.nodes.closeTaskDialog.listeners.click();
@@ -231,10 +231,10 @@ test("task dialog shows an error and retry, then updates after successful retry"
     const f = browser(async (url, options) => options.method === "POST" ? { task: task() } : { tasks: [task({ state: "branch_error", error: { message: "Нет доступа" } })] });
     await tick();
     f.nodes.todo.children[0].children[0].listeners.click();
-    assert.equal(f.nodes.taskDialogContent.children[3].textContent, "Нет доступа");
+    assert.equal(f.nodes.taskDialogContent.children.find((node) => node.className === "task-error").textContent, "Нет доступа");
     await f.nodes.taskDialogContent.children.at(-1).listeners.click();
     assert.equal(f.nodes.taskDialog.open, true);
-    assert.equal(f.nodes.taskDialogContent.children[2].textContent, "Ветка создана в GitHub");
+    assert.ok(f.nodes.taskDialogContent.children.some((node) => node.textContent === "Ветка создана в GitHub"));
     await vm.runInContext(`selectProject("${projectB.id}")`, f.context);
     assert.equal(f.nodes.taskDialog.open, false);
 });
@@ -346,4 +346,31 @@ test("a late poll cannot overwrite the editor opened while the request was pendi
     await request;
     assert.equal(f.nodes.todo.children.length, 1);
     assert.equal(f.nodes.taskDialog.open, true);
+});
+
+test("task details show the saved type and assignee, including unassigned legacy cards", async () => {
+    let tasks = [task({ type: "tests", assigneeId: "qwen" })];
+    const f = browser(async (url) => url === "/api/employees" ? [{ id: "qwen", name: "Qwen Code Agent", role: "AI Assistant" }] : { tasks });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    let text = descendants(f.nodes.taskDialogContent).map((node) => node.textContent);
+    assert.ok(text.includes("Тип задачи: Тесты"));
+    assert.ok(text.includes("Исполнитель: Qwen Code Agent"));
+    assert.ok(!descendants(f.nodes.todo).some((node) => node.textContent === "Исполнитель: Qwen Code Agent"));
+    tasks = [task()];
+    await vm.runInContext("refreshBoard()", f.context);
+    text = descendants(f.nodes.taskDialogContent).map((node) => node.textContent);
+    assert.ok(text.includes("Тип задачи: Не указан"));
+    assert.ok(text.includes("Исполнитель: Не назначен"));
+});
+
+test("an employee loaded after the dialog opens replaces the ID with a safe name", async () => {
+    let release;
+    const f = browser(async (url) => url === "/api/employees" ? new Promise((resolve) => { release = resolve; }) : { tasks: [task({ type: "docs", assigneeId: "person" })] });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    assert.ok(descendants(f.nodes.taskDialogContent).some((node) => node.textContent === "Исполнитель: person"));
+    release([{ id: "person", name: "<img src=x onerror=alert(1)>", role: "Developer" }]);
+    await tick();
+    assert.ok(descendants(f.nodes.taskDialogContent).some((node) => node.textContent === "Исполнитель: <img src=x onerror=alert(1)>"));
 });
