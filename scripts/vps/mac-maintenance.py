@@ -16,11 +16,17 @@ from pathlib import Path
 BASE = Path.home() / 'Library/Application Support/TaskManager'
 REMOTE = 'karina@78.153.149.128'
 KEY = str(Path.home() / '.ssh/task_manager_vps')
-SSH = ['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'UseKeychain=yes', '-o', 'IdentitiesOnly=yes', '-o', 'ConnectTimeout=12', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2', '-i', KEY]
+SSH = ['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'UseKeychain=yes', '-o', 'IdentitiesOnly=yes', '-o', 'ControlMaster=auto', '-o', 'ControlPersist=120', '-o', 'ControlPath=' + str(Path.home() / '.ssh/tm-%C'), '-o', 'ConnectTimeout=12', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=2', '-i', KEY]
 
 
 def run(command, timeout=60):
-    return subprocess.run(command, check=True, capture_output=True, timeout=timeout).stdout
+    for attempt in range(3):
+        try:
+            return subprocess.run(command, check=True, capture_output=True, timeout=timeout).stdout
+        except (subprocess.SubprocessError, OSError):
+            if attempt == 2:
+                raise
+            time.sleep(1)
 
 
 def verify(archive, digest):
@@ -71,8 +77,15 @@ def collect():
         if not archive.exists():
             partial = directory / (name + '.partial')
             try:
-                with partial.open('wb') as output:
-                    subprocess.run(SSH + [REMOTE, 'cat /var/lib/task-manager-export/' + name], stdout=output, stderr=subprocess.PIPE, check=True, timeout=120)
+                for attempt in range(3):
+                    try:
+                        with partial.open('wb') as output:
+                            subprocess.run(SSH + [REMOTE, 'cat /var/lib/task-manager-export/' + name], stdout=output, stderr=subprocess.PIPE, check=True, timeout=120)
+                        break
+                    except (subprocess.SubprocessError, OSError):
+                        if attempt == 2:
+                            raise
+                        time.sleep(1)
                 verify(partial, digest)
                 partial.replace(archive)
             finally:

@@ -6,6 +6,8 @@ import sqlite3
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location('maintenance', Path(__file__).parents[1] / 'scripts/vps/mac-maintenance.py')
@@ -40,3 +42,18 @@ class RestoreChecks(unittest.TestCase):
                 tar.add(root / 'db.sqlite', arcname='data/task-manager.sqlite')
             with self.assertRaises(sqlite3.DatabaseError):
                 maintenance.verify(archive, hashlib.sha256(archive.read_bytes()).hexdigest())
+
+
+class NetworkRetry(unittest.TestCase):
+    def test_temporary_connection_failure_is_retried(self):
+        failure = subprocess.CalledProcessError(255, ['ssh'])
+        success = subprocess.CompletedProcess(['ssh'], 0, stdout=b'ok')
+        with patch.object(maintenance.subprocess, 'run', side_effect=[failure, success]) as run, patch.object(maintenance.time, 'sleep'):
+            self.assertEqual(maintenance.run(['ssh']), b'ok')
+            self.assertEqual(run.call_count, 2)
+
+    def test_persistent_failure_is_bounded(self):
+        with patch.object(maintenance.subprocess, 'run', side_effect=subprocess.TimeoutExpired(['ssh'], 1)) as run, patch.object(maintenance.time, 'sleep'):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                maintenance.run(['ssh'])
+            self.assertEqual(run.call_count, 3)
