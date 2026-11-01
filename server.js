@@ -1,3 +1,4 @@
+const { createWindowLimit, singleGeneration } = require("./lib/request-limits");
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
@@ -31,7 +32,9 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
     }
     store = store || await new TaskStore(config.dataDir).open();
     const projects = new ProjectService(store, github);
+    generate = singleGeneration(generate);
     const tasks = new TaskService(store, github, generate, projects);
+    const loginLimit = createWindowLimit(30, 60_000);
     let database;
     let workspace;
     const auth = createAuth({ ...config.auth, secure: Boolean(config.sharedOrigin) });
@@ -69,7 +72,7 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
             const mutation = ["POST", "PATCH", "DELETE"].includes(request.method);
             if (route !== "/api/webhooks/github" && mutation &&
                 ((config.sharedOrigin && request.headers.origin !== origin) || (request.headers.origin && request.headers.origin !== origin) || ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"]))) {
-                throw new AppError(403, "origin", "Операция разрешена только со страницы локального приложения.");
+                throw new AppError(403, "origin", "Операция разрешена только со страницы приложения.");
             }
             if (request.method === "POST" && route === "/api/webhooks/github") {
                 const result = workspace.webhook(await readRaw(request), request.headers, config.webhookSecret);
@@ -85,6 +88,10 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                 return;
             }
             if (request.method === "POST" && ["/api/auth/login", "/api/auth/logout"].includes(route)) {
+                if (route === "/api/auth/login" && !loginLimit()) {
+                    response.setHeader("Retry-After", "60");
+                    throw new AppError(429, "login_limit", "Слишком много попыток входа. Подождите минуту.");
+                }
                 if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") throw new AppError(415, "content_type", "Используйте application/json.");
                 const body = await readJson(request, 16_384);
                 if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError(400, "body", "Ожидался объект.");
@@ -171,7 +178,7 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
             if ((request.method === "POST" && (route === "/api/tasks" || confirm || retry || move || projectMutation)) || (request.method === "PATCH" && projectUpdate)) {
                 if ((request.headers.origin && request.headers.origin !== origin) ||
                     ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"])) {
-                    throw new AppError(403, "origin", "Операция разрешена только со страницы локального приложения.");
+                    throw new AppError(403, "origin", "Операция разрешена только со страницы приложения.");
                 }
                 if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") {
                     throw new AppError(415, "content_type", "Используйте Content-Type: application/json.");

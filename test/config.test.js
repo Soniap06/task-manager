@@ -59,3 +59,11 @@ test("shared mode accepts only a canonical Tailscale HTTPS origin and complete a
         assert.throws(() => loadConfig({ ...env, [field]: "" }), { code: "shared_configuration" });
     }
 });
+
+test("DuckDNS requires an exact HTTPS origin and authentication", () => {
+    const env = { SHARED_ORIGIN: "https://task-manager-karina-sonia.duckdns.org", DEMO_USERNAME: "team", DEMO_PASSWORD: "test-pass", SESSION_SECRET: "s".repeat(32) };
+    assert.equal(loadConfig(env).sharedOrigin, env.SHARED_ORIGIN);
+    for (const origin of ["http://task.duckdns.org", "https://task.duckdns.org/", "https://task.duckdns.org:444", "https://task.duckdns.org.evil.test", "https://user:pass@task.duckdns.org"]) {
+        assert.throws(() => loadConfig({ ...env, SHARED_ORIGIN: origin }), { code: "shared_configuration" });
+    }
+});

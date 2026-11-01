@@ -119,3 +119,7 @@ Webhook: `POST /api/webhooks/github`, секрет GITHUB_WEBHOOK_SECRET, соб
 - [План GitHub-проектов](docs/plans/R4-create-task-branch.md), [план БД](docs/plans/DATA-1.1.md), [примеры](docs/PROJECT_EXAMPLES.md).
 
 `npm run check` проверяет синтаксис и ресурсы HTML. `npm test` проверяет LLM/GitHub, хранение, проекты, HTTP, логику UI и SQLite с заглушками внешних сервисов. CI не требует секретов и настоящей модели. Одна задача — одна ветка и PR; параллельно работайте в отдельных клонах/worktree.
+
+## Рабочий сервер
+
+Общий сайт: https://tm-project.duckdns.org/login. Конфигурация VPS, резервные копии, мониторинг, ограничения локального Qwen и порядок обновления/отката описаны в [docs/VPS.md](docs/VPS.md). Секреты и архивы не входят в Git.
