@@ -115,6 +115,27 @@ test("board search and drag/drop preserve project tasks and only request a statu
     assert.equal(f.nodes.reviewCount.textContent, "1");
 });
 
+test("board renders five columns and supports drops into every status", async () => {
+    const moved = [];
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (options.method === "POST") {
+            const body = JSON.parse(options.body);
+            moved.push(body.column);
+            return { task: task({ column: body.column }) };
+        }
+        return { tasks: [task()] };
+    });
+    await tick();
+    for (const column of ["backlog", "todo", "progress", "review", "done"]) {
+        assert.ok(f.nodes[column]);
+        f.nodes[column].listeners.drop({ preventDefault() {}, dataTransfer: { getData: () => "task-1" } });
+        await tick();
+    }
+    assert.deepEqual(moved, ["backlog", "todo", "progress", "review", "done"]);
+    assert.equal(f.nodes.doneCount.textContent, "1");
+});
+
 test("saved tasks resolve a matching pending draft in their own project", async () => {
     const draft = { projectId: projectA.id, requestId: randomUUID(), title: "Черновик" };
     const f = browser(async () => ({ tasks: [task({ requestId: draft.requestId, column: "review" })] }), draft);
@@ -362,6 +383,41 @@ test("task details show the saved type and assignee, including unassigned legacy
     text = descendants(f.nodes.taskDialogContent).map((node) => node.textContent);
     assert.ok(text.includes("Тип задачи: Не указан"));
     assert.ok(text.includes("Исполнитель: Не назначен"));
+});
+
+test("confirmed task editor saves title, description and a changed assignee", async () => {
+    let mutation;
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [{ id: "sofia", name: "София", role: "Разработчик" }];
+        if (options.method === "PATCH") {
+            mutation = { url, body: JSON.parse(options.body) };
+            return { task: task(mutation.body) };
+        }
+        return { tasks: [task()] };
+    });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    const edit = f.nodes.taskDialogContent.children.find((node) => node.textContent === "Редактировать карточку");
+    assert.ok(edit);
+    edit.listeners.click();
+
+    const details = f.nodes.taskDialogContent.children.find((node) => node.className === "task-details");
+    const title = details.children.find((node) => node.tag === "label" && node.textContent === "Название").children[0];
+    const description = details.children.find((node) => node.tag === "label" && node.textContent === "Описание").children[0];
+    const assignee = details.children.find((node) => node.tag === "label" && node.textContent === "Исполнитель").children[0];
+    title.value = "Переименованная задача";
+    title.listeners.input();
+    description.value = "Обновлённое описание";
+    description.listeners.input();
+    assignee.value = "sofia";
+    assignee.listeners.change();
+    const save = details.children.find((node) => node.className === "task-edit-actions").children[0];
+    await save.listeners.click();
+
+    assert.equal(mutation.url, "/api/tasks/task-1");
+    assert.deepEqual(mutation.body, { title: "Переименованная задача", description: "Обновлённое описание", assigneeId: "sofia" });
+    assert.equal(f.nodes.taskDialogTitle.textContent, "Переименованная задача");
+    assert.ok(f.nodes.taskDialogContent.children.some((node) => node.textContent === "Исполнитель: София"));
 });
 
 test("an employee loaded after the dialog opens replaces the ID with a safe name", async () => {

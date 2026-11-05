@@ -21,16 +21,38 @@ test("parallel requests create one persistent task and one branch; moving never 
     assert.equal(f.github.creates, 1);
     assert.equal(f.generations(), 1);
     await assert.rejects(f.service.create({ ...request, title: "Другая задача" }), { code: "request_conflict" });
-    await f.service.move(results[0].id, "review");
+    for (const column of ["backlog", "todo", "progress", "review", "done"]) await f.service.move(results[0].id, column);
     assert.equal(f.github.creates, 1);
     await f.store.close();
     const reopened = await new TaskStore(f.dir).open();
     t.after(() => reopened.close());
-    assert.equal(reopened.list()[0].column, "review");
+    assert.equal(reopened.list()[0].column, "done");
     const resumed = new TaskService(reopened, f.github, async () => { throw new Error("Should not regenerate"); });
     assert.equal((await resumed.create(request)).state, "branch_created");
     assert.equal((await resumed.retry(results[0].id)).state, "branch_created");
     assert.equal(f.github.creates, 1);
+});
+
+test("confirmed card edits preserve its project and branch without another GitHub write", async (t) => {
+    const f = await fixture(t);
+    const created = await createConfirmed(f.service, input(f.project.id));
+    const original = { id: created.id, input: created.input, projectId: created.projectId, repository: created.repository, branch: created.branch, branchUrl: created.branchUrl, confirmedAt: created.confirmedAt };
+
+    const updated = await f.service.update(created.id, { title: "Новое название", description: "Проверенное описание", assigneeId: "sofia" });
+    assert.equal(updated.title, "Новое название");
+    assert.equal(updated.description, "Проверенное описание");
+    assert.equal(updated.assigneeId, "sofia");
+    for (const [key, value] of Object.entries(original)) assert.equal(updated[key], value);
+
+    const unassigned = await f.service.update(created.id, { assigneeId: null });
+    assert.equal(unassigned.assigneeId, null);
+    assert.equal(f.github.creates, 1);
+    await assert.rejects(f.service.update(created.id, { title: " " }), { code: "task_title" });
+    await assert.rejects(f.service.update(created.id, { title: "x".repeat(301) }), { code: "task_title" });
+    await assert.rejects(f.service.update(created.id, { column: "done" }), { code: "task_fields" });
+
+    const draft = await f.service.create({ ...input(f.project.id), useAi: false });
+    await assert.rejects(f.service.update(draft.id, { title: "Нельзя" }), { code: "task_unconfirmed" });
 });
 
 test("timeout after successful GitHub creation is reconciled without another POST", async (t) => {
