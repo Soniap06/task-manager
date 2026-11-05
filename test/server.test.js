@@ -242,3 +242,20 @@ test("HTTP: shared HTTPS access requires login and canonical Origin; two clients
 test("HTTP: shared mode cannot start without authentication", async () => {
     await assert.rejects(createApp({ config: { ...require("../lib/config").loadConfig({}), sharedOrigin: "https://karina.example-tail.ts.net" } }), { code: "shared_configuration" });
 });
+
+test("DuckDNS login uses Secure cookies, enforces Origin and limits attempts", async (t) => {
+    const sharedOrigin = "https://task-manager-karina-sonia.duckdns.org";
+    const f = await start(t, { sharedOrigin, auth: { username: "team", password: "test-password", secret: "s".repeat(32) } });
+    const headers = { Host: new URL(sharedOrigin).host, Origin: sharedOrigin, "Content-Type": "application/json" };
+    const login = (password, extra = {}) => fetch(f.origin + "/api/auth/login", { method: "POST", headers: { ...headers, ...extra }, body: JSON.stringify({ username: "team", password }) });
+    assert.equal((await login("test-password", { Origin: "https://evil.test" })).status, 403);
+    const good = await login("test-password");
+    assert.equal(good.status, 200);
+    assert.match(good.headers.get("set-cookie"), /; Secure/);
+    for (let i = 0; i < 29; i += 1) assert.equal((await login("wrong")).status, 401);
+    const limited = await login("test-password");
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get("retry-after"), "60");
+    assert.equal((await fetch(f.origin + "/api/health")).status, 200);
+    assert.equal((await fetch(f.origin + "/api/tasks?projectId=" + f.project.id)).status, 401);
+});
