@@ -21,7 +21,7 @@ test("model only formats a draft and asks questions; branch and requirements are
             assert.equal(schema.properties.questions.maxItems, 3);
             assert.equal(schema.additionalProperties, false);
             assert.equal(options.headers.Authorization, undefined);
-            assert.deepEqual(JSON.parse(body.messages[1].content), { task: input, repository: "example/habits" });
+            assert.deepEqual(JSON.parse(body.messages[1].content), { task: input, repository: "example/habits", draft: { title: null, description: null }, clarifications: [], grilling: null });
             return reply(draft);
         }
     });

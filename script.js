@@ -16,6 +16,7 @@ let boardVersion = 0;
 let openTaskId = null;
 let employees = [];
 const editorDrafts = new Map();
+const interviewPages = new Map();
 const taskActionErrors = new Map();
 
 async function loadEmployees() {
@@ -128,7 +129,7 @@ async function addTask() {
         byId("skipAi").checked = draft.useAi === false;
         return;
     }
-    draft = draft || { projectId: project.id, requestId: crypto.randomUUID(), title, type: byId("taskTypeSelect").value, useAi: !byId("skipAi").checked, assigneeId: byId("assigneeSelect")?.value || null };
+    draft = draft || { projectId: project.id, requestId: crypto.randomUUID(), title, type: byId("taskTypeSelect").value, grilling: true, useAi: !byId("skipAi").checked, assigneeId: byId("assigneeSelect")?.value || null };
     try { localStorage.setItem(draftKey(project.id), JSON.stringify(draft)); } catch {
         feedback.textContent = "Разрешите локальное хранилище браузера для сохранения requestId.";
         return;
@@ -209,6 +210,12 @@ function renderTaskDetails() {
     byId("taskDialogTitle").textContent = task.title;
     const content = byId("taskDialogContent");
     content.replaceChildren();
+    const interviewing = Boolean(task.grillingVersion && !task.branch);
+    byId("taskDialog").className = interviewing ? "interview-dialog" : "";
+    if (interviewing) {
+        renderInterview(task, content);
+        return;
+    }
     content.appendChild(element("div", "task-status", task.repository));
     content.appendChild(element("p", "", `Тип задачи: ${Object.hasOwn(taskTypeLabels, task.type) ? taskTypeLabels[task.type] : "Не указан"}`));
     content.appendChild(element("p", "", `Исполнитель: ${task.assigneeId ? employees.find((employee) => employee.id === task.assigneeId)?.name || task.assigneeId : "Не назначен"}`));
@@ -255,7 +262,99 @@ function renderTaskDetails() {
     }
 }
 
-function renderDraftEditor(task, container) {
+function interviewDraft(task) {
+    let saved = editorDrafts.get(task.id);
+    const key = `task-manager.interview.v1:${task.id}`;
+    if (!saved || saved.draftRevision !== task.draftRevision) {
+        try { saved = JSON.parse(localStorage.getItem(key)); } catch { saved = null; }
+        if (!saved || saved.draftRevision !== task.draftRevision || !Array.isArray(saved.answers) || saved.answers.length !== task.questions.length || !saved.answers.every((answer) => typeof answer === "string" && answer.length <= 1000)) {
+            saved = { draftRevision: task.draftRevision, title: task.title, description: task.description, answers: task.questions.map(() => "") };
+        }
+        editorDrafts.set(task.id, saved);
+    }
+    return { saved, persist() { try { localStorage.setItem(key, JSON.stringify(saved)); } catch { /* In-memory draft remains available. */ } } };
+}
+
+function renderInterview(task, container) {
+    const current = task.grillingRounds || 0;
+    const previousPage = interviewPages.get(task.id);
+    const page = previousPage?.revision === task.draftRevision ? Math.min(previousPage.page, current) : current;
+    interviewPages.set(task.id, { revision: task.draftRevision, page });
+    const history = page < current;
+    const asking = !history && task.state === "clarification_required";
+    const final = !history && task.grillingReady && task.state === "draft_ready";
+    byId("taskDialogTitle").textContent = final ? "Проверьте информацию о задаче" : `Уточнение задачи · Раунд ${page + 1}`;
+    const intro = element("div", "interview-intro");
+    intro.appendChild(element("p", "interview-task", task.title));
+    intro.appendChild(element("p", "interview-hint", history ? "Отправленный раунд · ответы доступны только для просмотра" : final ? "Проверьте название и описание перед созданием ветки." : "Для уточнения задачи может потребоваться до 30 вопросов."));
+    if (!history && current === 0 && !final) intro.appendChild(element("p", "interview-notice", "Проверьте ответы перед отправкой. После отправки раунда изменить их будет нельзя."));
+    container.appendChild(intro);
+    const body = element("div", "interview-body");
+    container.appendChild(body);
+    const error = element("p", "task-error interview-error", taskActionErrors.get(task.id) || task.error?.message || "");
+    error.setAttribute("role", "alert");
+    const { saved, persist } = interviewDraft(task);
+    const inputs = [];
+    let editorAction;
+    if (history || asking) {
+        const questions = history ? (task.clarifications || []).filter((item) => item.round === page + 1) : task.questions.map((question, index) => ({ question, answer: saved.answers[index] || "" }));
+        const grid = element("div", "interview-questions");
+        questions.forEach((item, index) => {
+            const label = element("label", "interview-question");
+            label.appendChild(element("span", "question-number", String(index + 1).padStart(2, "0")));
+            label.appendChild(element("span", "question-title", item.question));
+            const input = element("textarea");
+            input.rows = 2;
+            input.maxLength = 1000;
+            input.placeholder = "Ваш ответ…";
+            input.value = item.answer;
+            input.readOnly = history;
+            input.disabled = busy;
+            input.dataset.editor = "answers";
+            if (!history) input.addEventListener("input", () => { saved.answers[index] = input.value; input.setAttribute("aria-invalid", "false"); persist(); });
+            label.appendChild(input);
+            grid.appendChild(label);
+            inputs.push(input);
+        });
+        body.appendChild(grid);
+    } else {
+        editorAction = renderDraftEditor(task, body, false);
+    }
+    body.appendChild(error);
+    const footer = element("div", "interview-footer");
+    const previous = element("button", "interview-back", "← Предыдущий раунд");
+    previous.disabled = busy || page === 0;
+    previous.addEventListener("click", () => { interviewPages.set(task.id, { revision: task.draftRevision, page: page - 1 }); renderTaskDetails(); });
+    footer.appendChild(previous);
+    if (asking || history) {
+        const next = element("button", "confirm-task", history ? "Далее →" : busy ? "Анализируем ответы…" : "Далее →");
+        next.disabled = busy || currentProject()?.archived;
+        next.addEventListener("click", () => {
+            if (history) { interviewPages.set(task.id, { revision: task.draftRevision, page: page + 1 }); renderTaskDetails(); return; }
+            const empty = inputs.filter((input) => !input.value.trim());
+            if (empty.length) {
+                empty.forEach((input) => input.setAttribute("aria-invalid", "true"));
+                error.textContent = "Ответьте на выделенные вопросы перед отправкой.";
+                empty[0].focus();
+                return;
+            }
+            return updateTask(task, "clarify", { title: saved.title, description: saved.description, answers: inputs.map((input) => input.value), draftRevision: task.draftRevision });
+        });
+        footer.appendChild(next);
+    }
+    if (!asking && !history) {
+        if (task.state === "generation_error") {
+            const retry = element("button", "interview-retry", "Повторить с ИИ");
+            retry.disabled = busy || currentProject()?.archived;
+            retry.addEventListener("click", () => updateTask(task, "branch/retry"));
+            footer.appendChild(retry);
+        }
+        if (editorAction) footer.appendChild(editorAction);
+    }
+    container.appendChild(footer);
+}
+
+function renderDraftEditor(task, container, appendAction = true) {
     const previous = editorDrafts.get(task.id);
     const saved = previous && previous.draftRevision === task.draftRevision ? previous : { draftRevision: task.draftRevision, title: task.title, description: task.description || task.input, answers: (task.questions || []).map(() => "") };
     editorDrafts.set(task.id, saved);
@@ -283,16 +382,19 @@ function renderDraftEditor(task, container) {
     const error = element("p", "task-error");
     error.setAttribute("role", "alert");
     container.appendChild(error);
-    const confirm = element("button", "confirm-task", "Подтвердить карточку и создать ветку");
-    confirm.disabled = busy || currentProject()?.archived;
+    const manualFallback = task.grillingVersion && task.state === "generation_error";
+    const clarifying = task.grillingVersion && task.state === "clarification_required";
+    const confirm = element("button", "confirm-task", clarifying ? "Отправить ответы и продолжить уточнение" : manualFallback ? "Подтвердить вручную без завершения ИИ и создать ветку" : "Подтвердить карточку и создать ветку");
+    confirm.disabled = busy || currentProject()?.archived || Boolean(task.grillingVersion && !clarifying && !manualFallback && !task.grillingReady);
     confirm.addEventListener("click", () => {
         if (fields.some((input) => !input.value.trim())) {
             error.textContent = "Заполните название, описание и ответы на все вопросы.";
             return;
         }
-        return updateTask(task, "confirm", { title: titleField.value, description: descriptionField.value, answers: answers.map((input) => input.value), draftRevision: task.draftRevision });
+        return updateTask(task, clarifying ? "clarify" : "confirm", { ...(manualFallback ? { manual: true } : {}), title: titleField.value, description: descriptionField.value, answers: answers.map((input) => input.value), draftRevision: task.draftRevision });
     });
-    container.appendChild(confirm);
+    if (appendAction) container.appendChild(confirm);
+    return confirm;
 }
 
 byId("closeTaskDialog").addEventListener("click", () => byId("taskDialog").close());

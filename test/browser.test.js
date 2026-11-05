@@ -374,3 +374,67 @@ test("an employee loaded after the dialog opens replaces the ID with a safe name
     await tick();
     assert.ok(descendants(f.nodes.taskDialogContent).some((node) => node.textContent === "Исполнитель: <img src=x onerror=alert(1)>"));
 });
+
+test("grilling sends answers to clarify, replaces the current round and keeps confirmation separate", async () => {
+    const draft = task({ branch: null, branchUrl: null, draftVersion: 1, grillingVersion: 1, grillingReady: false, state: "clarification_required", draftRevision: 1, questions: ["Первый вопрос?"] });
+    const next = { ...draft, draftRevision: 3, questions: ["Следующий вопрос?"] };
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (url.endsWith("/clarify")) return { task: next };
+        if (options.method === "POST") return { task: draft };
+        return { tasks: [] };
+    });
+    await tick();
+    f.nodes.taskInput.value = "Новая задача";
+    await f.nodes.addTaskButton.listeners.click();
+    const create = f.calls.find((call) => call.url === "/api/tasks" && call.options.method === "POST");
+    assert.equal(JSON.parse(create.options.body).grilling, true);
+    let nodes = descendants(f.nodes.taskDialogContent);
+    const answer = nodes.find((node) => node.dataset.editor === "answers");
+    answer.value = "Согласованное поведение";
+    answer.listeners.input();
+    await nodes.find((node) => node.className === "confirm-task").listeners.click();
+    assert.ok(f.calls.some((call) => call.url.endsWith("/clarify")));
+    assert.equal(f.calls.some((call) => call.url.endsWith("/confirm")), false);
+    nodes = descendants(f.nodes.taskDialogContent);
+    assert.equal(nodes.find((node) => node.dataset.editor === "answers").value, "");
+    assert.ok(nodes.some((node) => node.textContent === "Следующий вопрос?"));
+});
+
+test("interview validates a batch, retains its draft and browses submitted rounds read-only", async () => {
+    const draft = task({ branch: null, branchUrl: null, grillingVersion: 1, grillingRounds: 1, draftRevision: 3, state: "clarification_required", questions: ["Новый вопрос?"], clarifications: [{ question: "Прежний вопрос?", answer: "Сохранённый ответ", round: 1 }] });
+    const f = browser(async (url) => url === "/api/employees" ? [] : { tasks: [draft] });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    let nodes = descendants(f.nodes.taskDialogContent);
+    await nodes.find((node) => node.className === "confirm-task").listeners.click();
+    assert.ok(nodes.some((node) => node.textContent === "Ответьте на выделенные вопросы перед отправкой."));
+    assert.equal(f.calls.some((call) => call.url.endsWith("/clarify")), false);
+    const answer = nodes.find((node) => node.dataset.editor === "answers");
+    answer.value = "Ещё не отправлено";
+    answer.listeners.input();
+    assert.equal(JSON.parse(f.storage.get(`task-manager.interview.v1:${draft.id}`)).answers[0], answer.value);
+    nodes.find((node) => node.className === "interview-back").listeners.click();
+    nodes = descendants(f.nodes.taskDialogContent);
+    const history = nodes.find((node) => node.dataset.editor === "answers");
+    assert.equal(history.readOnly, true);
+    assert.equal(history.value, "Сохранённый ответ");
+    await nodes.find((node) => node.className === "confirm-task").listeners.click();
+    nodes = descendants(f.nodes.taskDialogContent);
+    assert.equal(nodes.find((node) => node.dataset.editor === "answers").value, "Ещё не отправлено");
+    assert.equal(f.calls.some((call) => call.options.method === "POST"), false);
+});
+
+test("interview review is separate and model errors retain retry and explicit manual confirmation", async () => {
+    for (const state of ["draft_ready", "generation_error"]) {
+        const draft = task({ branch: null, branchUrl: null, grillingVersion: 1, grillingReady: state === "draft_ready", grillingRounds: 3, draftRevision: 7, state, questions: [] });
+        const f = browser(async (url) => url === "/api/employees" ? [] : { tasks: [draft] });
+        await tick();
+        f.nodes.todo.children[0].children[0].listeners.click();
+        const nodes = descendants(f.nodes.taskDialogContent);
+        assert.equal(nodes.filter((node) => node.className === "confirm-task").length, 1);
+        assert.equal(nodes.some((node) => node.dataset.editor === "answers"), false);
+        if (state === "draft_ready") assert.equal(f.nodes.taskDialogTitle.textContent, "Проверьте информацию о задаче");
+        else assert.ok(nodes.some((node) => node.textContent === "Повторить с ИИ"));
+    }
+});

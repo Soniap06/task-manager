@@ -259,3 +259,20 @@ test("DuckDNS login uses Secure cookies, enforces Origin and limits attempts", a
     assert.equal((await fetch(f.origin + "/api/health")).status, 200);
     assert.equal((await fetch(f.origin + "/api/tasks?projectId=" + f.project.id)).status, 401);
 });
+
+test("HTTP: grilling accepts successive answers but never creates a branch during clarification", async (t) => {
+    const f = await start(t);
+    f.tasks.generate = async (_, context) => ({ ...specification, questions: context.clarifications.length < 9 ? Array.from({ length: 3 }, (_, i) => `Вопрос ${context.clarifications.length + i + 1}?`) : [] });
+    const post = (route, body) => fetch(f.origin + route, { method: "POST", headers: { "Content-Type": "application/json", Origin: f.origin }, body: JSON.stringify(body) });
+    let { task } = await (await post("/api/tasks", { projectId: f.project.id, requestId: randomUUID(), title: "Категории привычек", grilling: true })).json();
+    for (let i = 0; i < 3; i++) {
+        assert.equal((await post(`/api/tasks/${task.id}/confirm`, task)).status, 409);
+        const response = await post(`/api/tasks/${task.id}/clarify`, { ...task, answers: task.questions.map(() => "Ответ") });
+        assert.equal(response.status, 200);
+        task = (await response.json()).task;
+        assert.equal(f.github.creates, 0);
+    }
+    assert.equal(task.state, "draft_ready");
+    assert.equal((await post(`/api/tasks/${task.id}/confirm`, task)).status, 200);
+    assert.equal(f.github.creates, 1);
+});
