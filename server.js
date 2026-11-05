@@ -172,11 +172,12 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
             }
             const projectUpdate = route.match(/^\/api\/projects\/([a-f\d-]{36})$/i);
             const confirm = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/confirm$/i);
+            const clarify = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/clarify$/i);
             const retry = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/branch\/retry$/i);
             const move = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/column$/i);
             const taskUpdate = route.match(/^\/api\/tasks\/([a-f\d-]{36})$/i);
             const projectMutation = request.method === "POST" && ["/api/projects", "/api/github/repositories/resolve"].includes(route);
-            if ((request.method === "POST" && (route === "/api/tasks" || confirm || retry || move || projectMutation)) ||
+            if ((request.method === "POST" && (route === "/api/tasks" || confirm || clarify || retry || move || projectMutation)) ||
                 (request.method === "PATCH" && (projectUpdate || taskUpdate))) {
                 if ((request.headers.origin && request.headers.origin !== origin) ||
                     ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"])) {
@@ -200,7 +201,8 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                         workspace.employee(body.assigneeId);
                     }
                     task = await tasks.update(taskUpdate[1], body);
-                } else if (confirm) task = await tasks.confirm(confirm[1], body);
+                } else if (clarify) task = await tasks.clarify(clarify[1], body);
+                else if (confirm) task = await tasks.confirm(confirm[1], body);
                 else if (retry) task = await tasks.retry(retry[1]);
                 else if (move) task = await tasks.move(move[1], body.column);
                 else {

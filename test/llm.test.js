@@ -21,7 +21,7 @@ test("model only formats a draft and asks questions; branch and requirements are
             assert.equal(schema.properties.questions.maxItems, 3);
             assert.equal(schema.additionalProperties, false);
             assert.equal(options.headers.Authorization, undefined);
-            assert.deepEqual(JSON.parse(body.messages[1].content), { task: input, repository: "example/habits" });
+            assert.deepEqual(JSON.parse(body.messages[1].content), { task: input, repository: "example/habits", draft: { title: null, description: null }, clarifications: [], grilling: null });
             return reply(draft);
         }
     });
@@ -96,4 +96,9 @@ test("untrusted task stays separate from system instructions and key stays in he
         return reply(specification);
     } });
     assert.deepEqual(await generate(input), specification);
+});
+
+test("generation timeout is distinct from an offline model", async () => {
+    const generate = createLlm({}, { fetchFn: async () => { throw new DOMException("Timed out", "TimeoutError"); } });
+    await assert.rejects(generate("Задача"), { code: "llm_timeout", status: 504 });
 });

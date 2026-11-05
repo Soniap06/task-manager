@@ -54,7 +54,7 @@ test("HTTP: confirmed task can be edited and assigned without changing its branc
 
     const response = await fetch(`${f.origin}/api/tasks/${draft.id}`, {
         method: "PATCH", headers,
-        body: JSON.stringify({ title: "Новое название", description: "Изменённое описание", assigneeId: "sofia" })
+        body: JSON.stringify({ title: "Новое название", description: "Изменённое описание", assigneeId: "sofia", expectedRevision: 0 })
     });
     assert.equal(response.status, 200);
     const updated = (await response.json()).task;
@@ -66,7 +66,12 @@ test("HTTP: confirmed task can be edited and assigned without changing its branc
     assert.equal(updated.input, original.input);
     assert.equal(f.github.creates, 1);
 
-    const unassigned = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ assigneeId: null }) });
+    const stale = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ title: original.title, expectedRevision: 0 }) });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).error.code, "task_changed");
+    const crossSite = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers: { ...headers, Origin: "https://attacker.example" }, body: JSON.stringify({ title: "Чужая правка", expectedRevision: updated.editRevision }) });
+    assert.equal(crossSite.status, 403);
+    const unassigned = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ assigneeId: null, expectedRevision: updated.editRevision }) });
     assert.equal((await unassigned.json()).task.assigneeId, null);
     const unknownAssignee = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ assigneeId: "unknown" }) });
     assert.equal(unknownAssignee.status, 404);
@@ -300,4 +305,21 @@ test("DuckDNS login uses Secure cookies, enforces Origin and limits attempts", a
     assert.equal(limited.headers.get("retry-after"), "60");
     assert.equal((await fetch(f.origin + "/api/health")).status, 200);
     assert.equal((await fetch(f.origin + "/api/tasks?projectId=" + f.project.id)).status, 401);
+});
+
+test("HTTP: grilling accepts successive answers but never creates a branch during clarification", async (t) => {
+    const f = await start(t);
+    f.tasks.generate = async (_, context) => ({ ...specification, questions: context.clarifications.length < 9 ? Array.from({ length: 3 }, (_, i) => `Вопрос ${context.clarifications.length + i + 1}?`) : [] });
+    const post = (route, body) => fetch(f.origin + route, { method: "POST", headers: { "Content-Type": "application/json", Origin: f.origin }, body: JSON.stringify(body) });
+    let { task } = await (await post("/api/tasks", { projectId: f.project.id, requestId: randomUUID(), title: "Категории привычек", grilling: true })).json();
+    for (let i = 0; i < 3; i++) {
+        assert.equal((await post(`/api/tasks/${task.id}/confirm`, task)).status, 409);
+        const response = await post(`/api/tasks/${task.id}/clarify`, { ...task, answers: task.questions.map(() => "Ответ") });
+        assert.equal(response.status, 200);
+        task = (await response.json()).task;
+        assert.equal(f.github.creates, 0);
+    }
+    assert.equal(task.state, "draft_ready");
+    assert.equal((await post(`/api/tasks/${task.id}/confirm`, task)).status, 200);
+    assert.equal(f.github.creates, 1);
 });
