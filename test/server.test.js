@@ -30,11 +30,58 @@ test("HTTP: creates, reloads, repeats and moves a task with one GitHub branch", 
     assert.equal((await confirmed.json()).task.state, "branch_created");
     const again = await fetch(`${f.origin}/api/tasks`, { method: "POST", headers, body });
     assert.equal((await again.json()).task.id, task.id);
-    const moved = await fetch(`${f.origin}/api/tasks/${task.id}/column`, { method: "POST", headers, body: JSON.stringify({ column: "progress" }) });
-    assert.equal((await moved.json()).task.column, "progress");
+    for (const column of ["backlog", "todo", "progress", "review", "done"]) {
+        const moved = await fetch(`${f.origin}/api/tasks/${task.id}/column`, { method: "POST", headers, body: JSON.stringify({ column }) });
+        assert.equal(moved.status, 200);
+        assert.equal((await moved.json()).task.column, column);
+    }
+    const invalidMove = await fetch(`${f.origin}/api/tasks/${task.id}/column`, { method: "POST", headers, body: JSON.stringify({ column: "closed" }) });
+    assert.equal(invalidMove.status, 400);
     const board = await (await fetch(`${f.origin}/api/tasks?projectId=${f.project.id}`)).json();
     assert.equal(board.tasks.length, 1);
-    assert.equal(board.tasks[0].column, "progress");
+    assert.equal(board.tasks[0].column, "done");
+    assert.equal(f.github.creates, 1);
+});
+
+test("HTTP: confirmed task can be edited and assigned without changing its branch", async (t) => {
+    const f = await start(t);
+    const headers = { "Content-Type": "application/json", Origin: f.origin };
+    const createBody = { projectId: f.project.id, requestId: randomUUID(), title: "Форма входа", useAi: false };
+    const created = await fetch(`${f.origin}/api/tasks`, { method: "POST", headers, body: JSON.stringify(createBody) });
+    const draft = (await created.json()).task;
+    const confirmed = await fetch(`${f.origin}/api/tasks/${draft.id}/confirm`, { method: "POST", headers, body: JSON.stringify(draft) });
+    const original = (await confirmed.json()).task;
+
+    const response = await fetch(`${f.origin}/api/tasks/${draft.id}`, {
+        method: "PATCH", headers,
+        body: JSON.stringify({ title: "Новое название", description: "Изменённое описание", assigneeId: "sofia", expectedRevision: 0 })
+    });
+    assert.equal(response.status, 200);
+    const updated = (await response.json()).task;
+    assert.equal(updated.title, "Новое название");
+    assert.equal(updated.description, "Изменённое описание");
+    assert.equal(updated.assigneeId, "sofia");
+    assert.equal(updated.branch, original.branch);
+    assert.equal(updated.projectId, original.projectId);
+    assert.equal(updated.input, original.input);
+    assert.equal(f.github.creates, 1);
+
+    const stale = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ title: original.title, expectedRevision: 0 }) });
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json()).error.code, "task_changed");
+    const crossSite = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers: { ...headers, Origin: "https://attacker.example" }, body: JSON.stringify({ title: "Чужая правка", expectedRevision: updated.editRevision }) });
+    assert.equal(crossSite.status, 403);
+    const unassigned = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ assigneeId: null, expectedRevision: updated.editRevision }) });
+    assert.equal((await unassigned.json()).task.assigneeId, null);
+    const unknownAssignee = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ assigneeId: "unknown" }) });
+    assert.equal(unknownAssignee.status, 404);
+    const extraField = await fetch(`${f.origin}/api/tasks/${draft.id}`, { method: "PATCH", headers, body: JSON.stringify({ repository: "evil/repo" }) });
+    assert.equal(extraField.status, 400);
+
+    const pending = await fetch(`${f.origin}/api/tasks`, { method: "POST", headers, body: JSON.stringify({ ...createBody, requestId: randomUUID() }) });
+    const unconfirmed = (await pending.json()).task;
+    const rejected = await fetch(`${f.origin}/api/tasks/${unconfirmed.id}`, { method: "PATCH", headers, body: JSON.stringify({ title: "Нельзя" }) });
+    assert.equal(rejected.status, 409);
     assert.equal(f.github.creates, 1);
 });
 

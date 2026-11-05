@@ -21,16 +21,38 @@ test("parallel requests create one persistent task and one branch; moving never 
     assert.equal(f.github.creates, 1);
     assert.equal(f.generations(), 1);
     await assert.rejects(f.service.create({ ...request, title: "Другая задача" }), { code: "request_conflict" });
-    await f.service.move(results[0].id, "review");
+    for (const column of ["backlog", "todo", "progress", "review", "done"]) await f.service.move(results[0].id, column);
     assert.equal(f.github.creates, 1);
     await f.store.close();
     const reopened = await new TaskStore(f.dir).open();
     t.after(() => reopened.close());
-    assert.equal(reopened.list()[0].column, "review");
+    assert.equal(reopened.list()[0].column, "done");
     const resumed = new TaskService(reopened, f.github, async () => { throw new Error("Should not regenerate"); });
     assert.equal((await resumed.create(request)).state, "branch_created");
     assert.equal((await resumed.retry(results[0].id)).state, "branch_created");
     assert.equal(f.github.creates, 1);
+});
+
+test("confirmed card edits preserve its project and branch without another GitHub write", async (t) => {
+    const f = await fixture(t);
+    const created = await createConfirmed(f.service, input(f.project.id));
+    const original = { id: created.id, input: created.input, projectId: created.projectId, repository: created.repository, branch: created.branch, branchUrl: created.branchUrl, confirmedAt: created.confirmedAt };
+
+    const updated = await f.service.update(created.id, { expectedRevision: f.service.find(created.id).editRevision || 0, title: "Новое название", description: "Проверенное описание", assigneeId: "sofia" });
+    assert.equal(updated.title, "Новое название");
+    assert.equal(updated.description, "Проверенное описание");
+    assert.equal(updated.assigneeId, "sofia");
+    for (const [key, value] of Object.entries(original)) assert.equal(updated[key], value);
+
+    const unassigned = await f.service.update(created.id, { expectedRevision: f.service.find(created.id).editRevision || 0, assigneeId: null });
+    assert.equal(unassigned.assigneeId, null);
+    assert.equal(f.github.creates, 1);
+    await assert.rejects(f.service.update(created.id, { expectedRevision: f.service.find(created.id).editRevision || 0, title: " " }), { code: "task_title" });
+    await assert.rejects(f.service.update(created.id, { expectedRevision: f.service.find(created.id).editRevision || 0, title: "x".repeat(301) }), { code: "task_title" });
+    await assert.rejects(f.service.update(created.id, { expectedRevision: f.service.find(created.id).editRevision || 0, column: "done" }), { code: "task_fields" });
+
+    const draft = await f.service.create({ ...input(f.project.id), useAi: false });
+    await assert.rejects(f.service.update(draft.id, { title: "Нельзя" }), { code: "task_unconfirmed" });
 });
 
 test("timeout after successful GitHub creation is reconciled without another POST", async (t) => {
@@ -243,4 +265,22 @@ test("previous unconfirmed cards can enter the new draft flow without changing r
     const result = await f.service.confirm(ready.id, ready);
     assert.equal(result.repositoryId, created.repositoryId);
     assert.equal(result.state, "branch_created");
+});
+
+test("stale confirmed edits cannot overwrite a teammate's title and revision survives reopening", async (t) => {
+    const f = await fixture(t);
+    const task = await createConfirmed(f.service, input(f.project.id));
+    const first = await f.service.update(task.id, { title: "Правка Карины", expectedRevision: 0 });
+    assert.equal(first.editRevision, 1);
+    await assert.rejects(f.service.update(task.id, { title: task.title, description: task.description, assigneeId: "sofia", expectedRevision: 0 }), { code: "task_changed", status: 409 });
+    await assert.rejects(f.service.update(task.id, { title: "Без версии" }), { code: "task_revision" });
+    assert.equal(f.service.find(task.id).title, "Правка Карины");
+    const updated = await f.service.update(task.id, { assigneeId: "sofia", expectedRevision: 1 });
+    assert.equal(updated.title, "Правка Карины");
+    assert.equal(updated.editRevision, 2);
+    assert.equal(f.github.creates, 1);
+    await f.store.close();
+    const reopened = await new TaskStore(f.dir).open();
+    t.after(() => reopened.close());
+    assert.equal(reopened.list()[0].editRevision, 2);
 });

@@ -40,7 +40,7 @@ function browser(handler, draft = null, page = "index", search = "") {
             if (url === "/api/status") result = { configured: true };
             else if (url === "/api/projects" && options.method !== "POST") result = { projects: [projectA, projectB] };
             else result = await handler(url, options);
-            return { ok: true, json: async () => result };
+            return { ok: !result?.__status || result.__status < 400, status: result?.__status || 200, json: async () => result };
         }
     });
     vm.runInContext(fs.readFileSync(require.resolve(page === "index" ? "../script.js" : "../projects.js"), "utf8"), context);
@@ -113,6 +113,27 @@ test("board search and drag/drop preserve project tasks and only request a statu
     assert.equal(mutation.body.column, "review");
     assert.equal(f.nodes.review.children.length, 1);
     assert.equal(f.nodes.reviewCount.textContent, "1");
+});
+
+test("board renders five columns and supports drops into every status", async () => {
+    const moved = [];
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (options.method === "POST") {
+            const body = JSON.parse(options.body);
+            moved.push(body.column);
+            return { task: task({ column: body.column }) };
+        }
+        return { tasks: [task()] };
+    });
+    await tick();
+    for (const column of ["backlog", "todo", "progress", "review", "done"]) {
+        assert.ok(f.nodes[column]);
+        f.nodes[column].listeners.drop({ preventDefault() {}, dataTransfer: { getData: () => "task-1" } });
+        await tick();
+    }
+    assert.deepEqual(moved, ["backlog", "todo", "progress", "review", "done"]);
+    assert.equal(f.nodes.doneCount.textContent, "1");
 });
 
 test("saved tasks resolve a matching pending draft in their own project", async () => {
@@ -364,6 +385,41 @@ test("task details show the saved type and assignee, including unassigned legacy
     assert.ok(text.includes("Исполнитель: Не назначен"));
 });
 
+test("confirmed task editor saves title, description and a changed assignee", async () => {
+    let mutation;
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [{ id: "sofia", name: "София", role: "Разработчик" }];
+        if (options.method === "PATCH") {
+            mutation = { url, body: JSON.parse(options.body) };
+            return { task: task(mutation.body) };
+        }
+        return { tasks: [task()] };
+    });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    const edit = f.nodes.taskDialogContent.children.find((node) => node.textContent === "Редактировать карточку");
+    assert.ok(edit);
+    edit.listeners.click();
+
+    const details = f.nodes.taskDialogContent.children.find((node) => node.className === "task-details");
+    const title = details.children.find((node) => node.tag === "label" && node.textContent === "Название").children[0];
+    const description = details.children.find((node) => node.tag === "label" && node.textContent === "Описание").children[0];
+    const assignee = details.children.find((node) => node.tag === "label" && node.textContent === "Исполнитель").children[0];
+    title.value = "Переименованная задача";
+    title.listeners.input();
+    description.value = "Обновлённое описание";
+    description.listeners.input();
+    assignee.value = "sofia";
+    assignee.listeners.change();
+    const save = details.children.find((node) => node.className === "task-edit-actions").children[0];
+    await save.listeners.click();
+
+    assert.equal(mutation.url, "/api/tasks/task-1");
+    assert.deepEqual(mutation.body, { title: "Переименованная задача", description: "Обновлённое описание", assigneeId: "sofia", expectedRevision: 0 });
+    assert.equal(f.nodes.taskDialogTitle.textContent, "Переименованная задача");
+    assert.ok(f.nodes.taskDialogContent.children.some((node) => node.textContent === "Исполнитель: София"));
+});
+
 test("an employee loaded after the dialog opens replaces the ID with a safe name", async () => {
     let release;
     const f = browser(async (url) => url === "/api/employees" ? new Promise((resolve) => { release = resolve; }) : { tasks: [task({ type: "docs", assigneeId: "person" })] });
@@ -437,4 +493,56 @@ test("interview review is separate and model errors retain retry and explicit ma
         if (state === "draft_ready") assert.equal(f.nodes.taskDialogTitle.textContent, "Проверьте информацию о задаче");
         else assert.ok(nodes.some((node) => node.textContent === "Повторить с ИИ"));
     }
+});
+
+test("branch preview uses the chosen type and confirmation sends only the editable slug", async () => {
+    const draft = task({ id: "abcd1234-1234-4000-8000-123456789012", type: "tests", branch: null, branchUrl: null, branchNamingVersion: 1, branchSlug: "habit-history", draftRevision: 1, state: "draft_ready", questions: [] });
+    let submitted;
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (url.endsWith("/confirm")) { submitted = JSON.parse(options.body); return { task: { ...draft, branch: "test/history-validation-abcd1234", state: "branch_created" } }; }
+        return { tasks: [draft] };
+    });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    let nodes = descendants(f.nodes.taskDialogContent);
+    assert.ok(nodes.some((node) => node.textContent === "test/habit-history-abcd1234"));
+    const slug = nodes.find((node) => node.dataset.editor === "branchSlug");
+    slug.value = "../main";
+    await nodes.find((node) => node.className === "confirm-task").listeners.click();
+    assert.equal(submitted, undefined);
+    slug.value = "history-validation";
+    slug.listeners.input();
+    assert.ok(nodes.some((node) => node.textContent === "test/history-validation-abcd1234"));
+    await nodes.find((node) => node.className === "confirm-task").listeners.click();
+    assert.equal(submitted.branchSlug, "history-validation");
+    assert.equal(Object.hasOwn(submitted, "branch"), false);
+});
+
+
+test("stale editor preserves typed text until explicitly loading the latest card", async () => {
+    let current = task({ editRevision: 0 });
+    const f = browser(async (url, options) => {
+        if (url === "/api/employees") return [];
+        if (options.method === "PATCH") {
+            current = { ...current, title: "Сохранённая правка Карины", editRevision: 1 };
+            return { __status: 409, error: { code: "task_changed", message: "Карточка изменена другой участницей" } };
+        }
+        return { tasks: [current] };
+    });
+    await tick();
+    f.nodes.todo.children[0].children[0].listeners.click();
+    descendants(f.nodes.taskDialogContent).find((node) => node.textContent === "Редактировать карточку").listeners.click();
+    let nodes = descendants(f.nodes.taskDialogContent);
+    const title = nodes.find((node) => node.tag === "label" && node.textContent === "Название").children[0];
+    title.value = "Несохранённый текст Софии";
+    title.listeners.input();
+    await nodes.find((node) => node.textContent === "Сохранить изменения").listeners.click();
+    nodes = descendants(f.nodes.taskDialogContent);
+    assert.equal(nodes.find((node) => node.tag === "label" && node.textContent === "Название").children[0].value, "Несохранённый текст Софии");
+    assert.equal(nodes.find((node) => node.textContent === "Сохранить изменения").disabled, true);
+    await nodes.find((node) => node.textContent === "Загрузить свежую версию").listeners.click();
+    assert.equal(f.nodes.taskDialogTitle.textContent, "Сохранённая правка Карины");
+    descendants(f.nodes.taskDialogContent).find((node) => node.textContent === "Редактировать карточку").listeners.click();
+    assert.equal(descendants(f.nodes.taskDialogContent).find((node) => node.tag === "label" && node.textContent === "Название").children[0].value, "Сохранённая правка Карины");
 });

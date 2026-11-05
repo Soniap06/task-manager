@@ -97,3 +97,8 @@ test("untrusted task stays separate from system instructions and key stays in he
     } });
     assert.deepEqual(await generate(input), specification);
 });
+
+test("generation timeout is distinct from an offline model", async () => {
+    const generate = createLlm({}, { fetchFn: async () => { throw new DOMException("Timed out", "TimeoutError"); } });
+    await assert.rejects(generate("Задача"), { code: "llm_timeout", status: 504 });
+});

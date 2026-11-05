@@ -67,3 +67,20 @@ test("DuckDNS requires an exact HTTPS origin and authentication", () => {
         assert.throws(() => loadConfig({ ...env, SHARED_ORIGIN: origin }), { code: "shared_configuration" });
     }
 });
+
+test("fresh setup creates both configs and preserves personal settings on repeat", async (t) => {
+    const f = await fixture(t);
+    await fs.mkdir(path.join(f.root, "scripts"));
+    for (const name of [".env.example", "ai.config.example.json", "scripts/setup.mjs"]) {
+        await fs.copyFile(path.join(__dirname, "..", name), path.join(f.root, name));
+    }
+    const { execFileSync } = require("node:child_process");
+    execFileSync(process.execPath, [path.join(f.root, "scripts/setup.mjs")]);
+    assert.equal(await fs.readFile(path.join(f.root, ".env"), "utf8"), await fs.readFile(path.join(f.root, ".env.example"), "utf8"));
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(f.root, "ai.config.json"), "utf8")), defaults);
+    await fs.writeFile(path.join(f.root, ".env"), "PERSONAL_SETTING=keep\n");
+    await fs.writeFile(path.join(f.root, "ai.config.json"), '{"personal":"keep"}\n');
+    execFileSync(process.execPath, [path.join(f.root, "scripts/setup.mjs")]);
+    assert.equal(await fs.readFile(path.join(f.root, ".env"), "utf8"), "PERSONAL_SETTING=keep\n");
+    assert.equal(await fs.readFile(path.join(f.root, "ai.config.json"), "utf8"), '{"personal":"keep"}\n');
+});

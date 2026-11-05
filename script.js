@@ -3,7 +3,8 @@ const taskInput = byId("taskInput");
 const addTaskButton = byId("addTaskButton");
 const connectionStatus = byId("connectionStatus");
 const feedback = byId("feedback");
-const columns = ["todo", "progress", "review"];
+const columns = ["backlog", "todo", "progress", "review", "done"];
+const branchPrefixes = { feature: "feat", fix: "fix", tests: "test", docs: "docs" };
 const taskTypeLabels = { feature: "Новая функция", fix: "Исправление", tests: "Тесты", docs: "Документация" };
 const draftPrefix = "task-manager.pending-create.v2:";
 const stateLabels = { draft_ready: "Черновик — проверьте перед созданием ветки", clarification_required: "Нужны ответы на уточняющие вопросы", generating: "Подготовка черновика не завершена", generation_error: "ИИ недоступен или вернул ошибку — можно заполнить вручную", branch_pending: "Создание ветки не завершено", branch_error: "Ошибка создания ветки", branch_created: "Ветка создана в GitHub" };
@@ -17,6 +18,7 @@ let openTaskId = null;
 let employees = [];
 const editorDrafts = new Map();
 const interviewPages = new Map();
+const confirmedEditorDrafts = new Map();
 const taskActionErrors = new Map();
 
 async function loadEmployees() {
@@ -41,13 +43,19 @@ function element(tag, className, text) {
 
 async function api(url, options = {}) {
     let response;
+    // One draft call (configured up to 600s), optional naming (up to 45s), and repository checks.
+    const generating = options.method === "POST" && (url === "/api/tasks" || /\/(?:clarify|branch\/retry)$/.test(url));
     try {
-        response = await fetch(url, { ...options, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(240_000) });
+        response = await fetch(url, { ...options, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(generating ? 720_000 : 240_000) });
     } catch { throw new Error("Нет ответа сервера. Обновите доску перед повтором: операция могла завершиться."); }
     let data;
     try { data = await response.json(); } catch { throw new Error("Сервер вернул непонятный ответ. Обновите доску."); }
     if (response.status === 401) location.assign("/login");
-    if (!response.ok) throw new Error(data.error?.message || `Ошибка HTTP ${response.status}`);
+    if (!response.ok) {
+        const error = new Error(data.error?.message || `Ошибка HTTP ${response.status}`);
+        error.code = data.error?.code;
+        throw error;
+    }
     return data;
 }
 
@@ -129,7 +137,7 @@ async function addTask() {
         byId("skipAi").checked = draft.useAi === false;
         return;
     }
-    draft = draft || { projectId: project.id, requestId: crypto.randomUUID(), title, type: byId("taskTypeSelect").value, grilling: true, useAi: !byId("skipAi").checked, assigneeId: byId("assigneeSelect")?.value || null };
+    draft = draft || { projectId: project.id, requestId: crypto.randomUUID(), title, type: byId("taskTypeSelect").value, grilling: true, readableBranch: true, useAi: !byId("skipAi").checked, assigneeId: byId("assigneeSelect")?.value || null };
     try { localStorage.setItem(draftKey(project.id), JSON.stringify(draft)); } catch {
         feedback.textContent = "Разрешите локальное хранилище браузера для сохранения requestId.";
         return;
@@ -170,6 +178,25 @@ async function updateTask(task, action, body = {}) {
     finally { busy = false; updateControls(); }
 }
 
+async function saveConfirmedTask(task, body) {
+    if (busy) return;
+    busy = true;
+    boardVersion++;
+    updateControls();
+    try {
+        const { task: result } = await api(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        taskActionErrors.delete(task.id);
+        confirmedEditorDrafts.delete(task.id);
+        if (activeProjectId === task.projectId) boardTasks = boardTasks.map((item) => item.id === task.id ? result : item);
+        feedback.textContent = `${task.repository}: изменения сохранены.`;
+    } catch (error) {
+        if (error.code === "task_changed" && confirmedEditorDrafts.has(task.id)) confirmedEditorDrafts.get(task.id).conflict = true;
+        taskActionErrors.set(task.id, error.message);
+        showError(error);
+    }
+    finally { busy = false; updateControls(); }
+}
+
 function renderBoard() {
     for (const column of columns) byId(column).replaceChildren();
     const query = byId("taskSearch").value.trim().toLocaleLowerCase("ru-RU");
@@ -188,7 +215,8 @@ function renderBoard() {
         });
         card.appendChild(openButton);
         const buttons = element("div", "task-buttons");
-        const index = columns.indexOf(task.column);
+        const taskColumn = columns.includes(task.column) ? task.column : "todo";
+        const index = columns.indexOf(taskColumn);
         for (const [text, direction, label] of [["←", -1, "Переместить влево"], ["→", 1, "Переместить вправо"]]) {
             const button = element("button", "", text);
             button.title = label;
@@ -198,7 +226,7 @@ function renderBoard() {
             buttons.appendChild(button);
         }
         card.appendChild(buttons);
-        byId(columns.includes(task.column) ? task.column : "todo").appendChild(card);
+        byId(taskColumn).appendChild(card);
     }
     for (const column of columns) byId(`${column}Count`).textContent = String(byId(column).children.length);
     if (byId("taskDialog").open) renderTaskDetails();
@@ -207,6 +235,7 @@ function renderBoard() {
 function renderTaskDetails() {
     const task = boardTasks.find((item) => item.id === openTaskId);
     if (!task) { byId("taskDialog").close(); return; }
+    const editingConfirmed = confirmedEditorDrafts.has(task.id);
     byId("taskDialogTitle").textContent = task.title;
     const content = byId("taskDialogContent");
     content.replaceChildren();
@@ -218,7 +247,7 @@ function renderTaskDetails() {
     }
     content.appendChild(element("div", "task-status", task.repository));
     content.appendChild(element("p", "", `Тип задачи: ${Object.hasOwn(taskTypeLabels, task.type) ? taskTypeLabels[task.type] : "Не указан"}`));
-    content.appendChild(element("p", "", `Исполнитель: ${task.assigneeId ? employees.find((employee) => employee.id === task.assigneeId)?.name || task.assigneeId : "Не назначен"}`));
+    if (!editingConfirmed) content.appendChild(element("p", "", `Исполнитель: ${task.assigneeId ? employees.find((employee) => employee.id === task.assigneeId)?.name || task.assigneeId : "Не назначен"}`));
     const branch = element("div", "task-branch");
     if (task.state === "branch_created" && task.branchUrl?.startsWith("https://github.com/")) {
         const link = element("a", "", task.branch);
@@ -238,6 +267,12 @@ function renderTaskDetails() {
     }
     if (task.projectId && !task.branch) {
         renderDraftEditor(task, details);
+    } else if (editingConfirmed) {
+        renderConfirmedEditor(task, details);
+        for (const item of task.clarifications || []) {
+            details.appendChild(element("strong", "", item.question));
+            details.appendChild(element("p", "task-source", item.answer));
+        }
     } else if (task.description) {
         details.appendChild(element("strong", "", "Описание:"));
         details.appendChild(element("p", "task-source", task.description));
@@ -254,6 +289,16 @@ function renderTaskDetails() {
         details.appendChild(list);
     }
     content.appendChild(details);
+    if (task.branch && !task.legacyUnlinked && !editingConfirmed) {
+        const edit = element("button", "", "Редактировать карточку");
+        edit.disabled = busy || currentProject()?.archived === true;
+        edit.addEventListener("click", () => {
+            confirmedEditorDrafts.set(task.id, { title: task.title, description: task.description || "", assigneeId: task.assigneeId || "", expectedRevision: task.editRevision || 0 });
+            taskActionErrors.delete(task.id);
+            renderTaskDetails();
+        });
+        content.appendChild(edit);
+    }
     if (task.state !== "branch_created" && !task.legacyUnlinked) {
         const retry = element("button", "", task.branch ? "Повторить создание ветки" : "Повторить подготовку с ИИ");
         retry.disabled = busy || currentProject()?.archived;
@@ -361,7 +406,7 @@ function renderDraftEditor(task, container, appendAction = true) {
     const fields = [];
     function field(labelText, value, max, key, index) {
         const label = element("label", "draft-field", labelText);
-        const input = element(key === "title" ? "input" : "textarea");
+        const input = element((key === "title" || key === "branchSlug") ? "input" : "textarea");
         input.value = value;
         input.maxLength = max;
         input.disabled = busy;
@@ -377,6 +422,17 @@ function renderDraftEditor(task, container, appendAction = true) {
     }
     const titleField = field("Название", saved.title, 300, "title");
     const descriptionField = field("Описание — проверьте и при необходимости измените", saved.description, 1500, "description");
+    let branchField;
+    if (task.branchNamingVersion && (!task.grillingVersion || task.state !== "clarification_required")) {
+        branchField = field("Название ветки — смысловая часть на английском", saved.branchSlug ?? task.branchSlug ?? "", 60, "branchSlug");
+        branchField.placeholder = "habit-categories";
+        const preview = element("p", "interview-hint");
+        const updatePreview = () => { preview.textContent = `${branchPrefixes[task.type] || "feat"}/${branchField.value || "название"}-${task.id.replace(/-/g, "").slice(0, 8)}`; };
+        branchField.addEventListener("input", () => { saved.branchSlug = branchField.value; error.textContent = ""; updatePreview(); });
+        updatePreview();
+        container.appendChild(preview);
+        if (task.branchSuggestionError) container.appendChild(element("p", "interview-hint", task.branchSuggestionError));
+    }
     if (task.questions?.length) container.appendChild(element("p", "", "Если вопрос не относится к задаче, укажите это в ответе."));
     const answers = (task.questions || []).map((question, index) => field(question, saved.answers[index] || "", 1000, "answers", index));
     const error = element("p", "task-error");
@@ -387,14 +443,104 @@ function renderDraftEditor(task, container, appendAction = true) {
     const confirm = element("button", "confirm-task", clarifying ? "Отправить ответы и продолжить уточнение" : manualFallback ? "Подтвердить вручную без завершения ИИ и создать ветку" : "Подтвердить карточку и создать ветку");
     confirm.disabled = busy || currentProject()?.archived || Boolean(task.grillingVersion && !clarifying && !manualFallback && !task.grillingReady);
     confirm.addEventListener("click", () => {
+        if (branchField && (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(branchField.value) || branchField.value.length < 3 || branchField.value.length > 60)) {
+            error.textContent = "Введите название ветки на английском: строчные буквы, цифры и одиночные дефисы. Без префикса и ID.";
+            branchField.focus();
+            return;
+        }
         if (fields.some((input) => !input.value.trim())) {
             error.textContent = "Заполните название, описание и ответы на все вопросы.";
             return;
         }
-        return updateTask(task, clarifying ? "clarify" : "confirm", { ...(manualFallback ? { manual: true } : {}), title: titleField.value, description: descriptionField.value, answers: answers.map((input) => input.value), draftRevision: task.draftRevision });
+        return updateTask(task, clarifying ? "clarify" : "confirm", { ...(manualFallback ? { manual: true } : {}), ...(branchField ? { branchSlug: branchField.value } : {}), title: titleField.value, description: descriptionField.value, answers: answers.map((input) => input.value), draftRevision: task.draftRevision });
     });
     if (appendAction) container.appendChild(confirm);
     return confirm;
+}
+
+function renderConfirmedEditor(task, container) {
+    const saved = confirmedEditorDrafts.get(task.id);
+    const title = element("input");
+    title.value = saved.title;
+    title.maxLength = 300;
+    title.disabled = busy;
+    title.addEventListener("input", () => { saved.title = title.value; });
+    const titleLabel = element("label", "draft-field", "Название");
+    titleLabel.appendChild(title);
+    container.appendChild(titleLabel);
+
+    const description = element("textarea");
+    description.value = saved.description;
+    description.maxLength = 1500;
+    description.disabled = busy;
+    description.addEventListener("input", () => { saved.description = description.value; });
+    const descriptionLabel = element("label", "draft-field", "Описание");
+    descriptionLabel.appendChild(description);
+    container.appendChild(descriptionLabel);
+
+    const assignee = element("select");
+    const unassigned = element("option", "", "Не назначен");
+    unassigned.value = "";
+    assignee.appendChild(unassigned);
+    if (saved.assigneeId && !employees.some((employee) => employee.id === saved.assigneeId)) {
+        const unknown = element("option", "", `Неизвестный исполнитель (${saved.assigneeId})`);
+        unknown.value = saved.assigneeId;
+        assignee.appendChild(unknown);
+    }
+    for (const employee of employees) {
+        const option = element("option", "", `${employee.name} — ${employee.role}`);
+        option.value = employee.id;
+        assignee.appendChild(option);
+    }
+    assignee.value = saved.assigneeId;
+    assignee.disabled = busy;
+    assignee.addEventListener("change", () => { saved.assigneeId = assignee.value; });
+    const assigneeLabel = element("label", "draft-field", "Исполнитель");
+    assigneeLabel.appendChild(assignee);
+    container.appendChild(assigneeLabel);
+
+    const error = element("p", "task-error");
+    error.setAttribute("role", "alert");
+    container.appendChild(error);
+    const actions = element("div", "task-edit-actions");
+    const save = element("button", "confirm-task", "Сохранить изменения");
+    save.type = "button";
+    save.disabled = busy || saved.conflict || currentProject()?.archived === true;
+    save.addEventListener("click", () => {
+        if (!title.value.trim() || !description.value.trim()) {
+            error.textContent = "Заполните название и описание карточки.";
+            return;
+        }
+        const patch = { title: title.value, description: description.value, expectedRevision: saved.expectedRevision };
+        const assigneeId = assignee.value || null;
+        if (assigneeId !== (task.assigneeId ?? null)) patch.assigneeId = assigneeId;
+        return saveConfirmedTask(task, patch);
+    });
+    const cancel = element("button", "", "Отмена");
+    cancel.type = "button";
+    cancel.disabled = busy;
+    cancel.addEventListener("click", () => {
+        confirmedEditorDrafts.delete(task.id);
+        taskActionErrors.delete(task.id);
+        renderTaskDetails();
+    });
+    actions.appendChild(save);
+    actions.appendChild(cancel);
+    if (saved.conflict) {
+        container.appendChild(element("p", "task-error", "Несохранённый текст оставлен в форме. Загрузка свежей версии сбросит эти правки."));
+        const reload = element("button", "", "Загрузить свежую версию");
+        reload.disabled = busy;
+        reload.addEventListener("click", async () => {
+            try {
+                await refreshBoard();
+                confirmedEditorDrafts.delete(task.id);
+                taskActionErrors.delete(task.id);
+                renderTaskDetails();
+            } catch (error) { showError(error); }
+        });
+        actions.appendChild(reload);
+    }
+    container.appendChild(actions);
 }
 
 byId("closeTaskDialog").addEventListener("click", () => byId("taskDialog").close());

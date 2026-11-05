@@ -80,10 +80,15 @@ test("LLM receives answers, current draft and question budget as data", async ()
     const grilling = { minimum: 9, maximum: 30, answered: 1 };
     const generate = createLlm({}, { fetchFn: async (_, options) => {
         const body = JSON.parse(options.body);
-        const data = JSON.parse(body.messages[1].content);
-        assert.deepEqual(data.clarifications, clarifications);
+        assert.equal(JSON.parse(body.messages[1].content).task, "Категории");
+        assert.equal(body.messages[2].role, "assistant");
+        assert.deepEqual(JSON.parse(body.messages[2].content).questions, ["Удалять привычки?"]);
+        assert.equal(body.messages[3].role, "user");
+        assert.deepEqual(JSON.parse(body.messages[3].content).answers, [{ question: "Удалять привычки?", answer: "Нет" }]);
+        const data = JSON.parse(body.messages.at(-1).content);
         assert.deepEqual(data.grilling, grilling);
         assert.equal(data.draft.description, "Не удалять привычки");
+        assert.deepEqual(data.lastAnswers, [{ question: "Удалять привычки?", answer: "Нет" }]);
         return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(specification) } }] }));
     } });
     await generate("Категории", { clarifications, grilling, description: "Не удалять привычки" });
@@ -122,4 +127,22 @@ test("a short final round finishes interview and cannot be followed by more ques
     task = await f.service.retry(task.id);
     assert.equal(task.state, "draft_ready");
     assert.equal(f.github.creates, 0);
+});
+
+test("schema enforces the remaining question budget and final summary", async () => {
+    for (const [grilling, maxItems, minItems] of [
+        [{ minimum: 9, maximum: 30, answered: 0 }, 5, 3],
+        [{ minimum: 9, maximum: 30, answered: 8 }, 5, 1],
+        [{ minimum: 9, maximum: 30, answered: 29 }, 1, undefined],
+        [{ minimum: 9, maximum: 30, answered: 30 }, 0, undefined],
+        [{ minimum: 9, maximum: 30, answered: 10, finalize: true }, 0, undefined]
+    ]) {
+        const generate = createLlm({}, { fetchFn: async (_, options) => {
+            const body = JSON.parse(options.body);
+            assert.equal(body.response_format.json_schema.schema.properties.questions.maxItems, maxItems);
+            assert.equal(body.response_format.json_schema.schema.properties.questions.minItems, minItems);
+            return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(specification) } }] }));
+        } });
+        await generate("Задача", { grilling });
+    }
 });

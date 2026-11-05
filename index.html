@@ -63,6 +63,11 @@
     </div>
 
     <section class="board">
+        <div class="column" data-status="backlog">
+            <h2 class="colhead"><span class="head-left"><span class="dot" aria-hidden="true"></span>BACKLOG</span><span class="count" id="backlogCount">0</span></h2>
+            <div class="task-list column-cards" id="backlog"></div>
+        </div>
+
         <div class="column" data-status="todo">
             <h2 class="colhead"><span class="head-left"><span class="dot" aria-hidden="true"></span>TO DO</span><span class="count" id="todoCount">0</span></h2>
             <div class="task-list column-cards" id="todo"></div>
@@ -76,6 +81,11 @@
         <div class="column" data-status="review">
             <h2 class="colhead"><span class="head-left"><span class="dot" aria-hidden="true"></span>REVIEW</span><span class="count" id="reviewCount">0</span></h2>
             <div class="task-list column-cards" id="review"></div>
+        </div>
+
+        <div class="column" data-status="done">
+            <h2 class="colhead"><span class="head-left"><span class="dot" aria-hidden="true"></span>DONE</span><span class="count" id="doneCount">0</span></h2>
+            <div class="task-list column-cards" id="done"></div>
         </div>
     </section>
     <footer>Task Manager · учебный проект по технологиям программирования</footer>

@@ -62,7 +62,16 @@
 #connectionStatus, #feedback { font-size: 12px; line-height: 1.6; color: #79525c; overflow-wrap: anywhere; margin: 0 0 14px; }
 #connectionStatus:empty, #feedback:empty { display: none; }
 
-.workspace-page .board { flex: 1; }
+.workspace-page .board {
+    flex: 1;
+    min-width: 0;
+    grid-template-columns: repeat(5, minmax(190px, 1fr));
+    align-items: start;
+    overflow-x: auto;
+    padding-bottom: 8px;
+}
+.workspace-page .column[data-status="backlog"] .dot { background: #98705e; }
+.workspace-page .column[data-status="done"] .dot { background: #8b7f92; }
 .workspace-page .colhead { margin: 0 0 12px; font-size: 12px; }
 .workspace-page .colhead .head-left { min-width: 0; }
 .workspace-page .task-list { min-height: 180px; }
@@ -117,7 +126,7 @@
 .task-details ul, .task-details ol { padding-left: 22px; }
 .task-source { white-space: pre-wrap; overflow-wrap: anywhere; }
 .draft-field { display: block; margin: 16px 0; font-size: 12px; font-weight: 600; }
-.draft-field input, .draft-field textarea {
+.draft-field input, .draft-field textarea, .draft-field select {
     display: block;
     width: 100%;
     min-width: 0;
@@ -131,6 +140,7 @@
 }
 .draft-field textarea { min-height: 90px; resize: vertical; }
 #taskDialog .confirm-task { background: var(--accent); border-color: var(--accent); color: white; margin: 8px 0; }
+.task-edit-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 
 .page-intro { color: #79525c; margin: -4px 0 24px; font-size: 13px; line-height: 1.7; }
 .projects-layout { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 24px; }
