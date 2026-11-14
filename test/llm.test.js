@@ -13,7 +13,7 @@ test("model only formats a draft and asks questions; branch and requirements are
             const body = JSON.parse(options.body);
             assert.equal(url, "http://127.0.0.1:1234/v1/chat/completions");
             assert.equal(body.model, "local-model");
-            assert.equal(body.temperature, 0.1);
+            assert.equal(body.temperature, require("../ai.config.example.json").generation.temperature);
             assert.equal(body.max_tokens, 1600);
             assert.equal(body.stream, false);
             const schema = body.response_format.json_schema.schema;

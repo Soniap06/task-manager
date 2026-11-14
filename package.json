@@ -14,6 +14,7 @@
     "test": "node --test test/*.test.js",
     "db:init": "node --env-file-if-exists=.env scripts/db-init.js",
     "github:check": "node --env-file-if-exists=.env scripts/github-check.js",
-    "llm:check": "node --env-file-if-exists=.env scripts/llm-check.js"
+    "llm:check": "node --env-file-if-exists=.env scripts/llm-check.js",
+    "llm:quality": "node --env-file-if-exists=.env scripts/llm-quality-check.js"
   }
 }
