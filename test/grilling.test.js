@@ -52,16 +52,32 @@ test("complex tasks can reach thirty questions and never ask thirty-one", async 
     assert.equal(f.github.creates, 0);
 });
 
-test("early completion and repeated answered questions fail without false readiness", async (t) => {
+test("clear tasks may finish early while repeated answered questions still fail", async (t) => {
     const f = await setup(t);
     f.service.generate = async () => specification;
-    let task = await f.service.clarify(f.task.id, payload(f.task));
-    assert.equal(task.error.code, "grilling_budget");
-    assert.equal(task.clarifications.length, 3);
-    f.service.generate = async () => ({ ...specification, questions: [f.task.questions[0], "Новая граница?", "Новый сценарий?"] });
-    task = await f.service.retry(task.id);
-    assert.equal(task.error.code, "grilling_repeat");
-    assert.equal(task.grillingReady, false);
+    const ready = await f.service.clarify(f.task.id, payload(f.task));
+    assert.equal(ready.grillingReady, true);
+    assert.equal(ready.error, null);
+    assert.equal(ready.clarifications.length, 3);
+    assert.equal(f.github.creates, 0);
+    const other = await setup(t);
+    other.service.generate = async () => ({ ...specification, questions: [other.task.questions[0], "Новая граница?", "Новый сценарий?"] });
+    const repeated = await other.service.clarify(other.task.id, payload(other.task));
+    assert.equal(repeated.error.code, "grilling_repeat");
+    assert.equal(repeated.grillingReady, false);
+});
+
+test("an explicit task can have zero questions without creating a branch", async (t) => {
+    const f = await fixture(t);
+    f.service.generate = async (_, context) => {
+        assert.equal(context.grilling.minimum, 0);
+        return specification;
+    };
+    const task = await f.service.create({ projectId: f.project.id, requestId: randomUUID(), title: "Ясная задача", grilling: true });
+    assert.equal(task.grillingReady, true);
+    assert.deepEqual(task.questions, []);
+    assert.equal(task.branch, null);
+    assert.equal(f.github.creates, 0);
 });
 
 test("answers persist across model failure and retry; manual bypass requires explicit consent", async (t) => {

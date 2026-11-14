@@ -331,7 +331,7 @@ function renderInterview(task, container) {
     byId("taskDialogTitle").textContent = final ? "Проверьте информацию о задаче" : `Уточнение задачи · Раунд ${page + 1}`;
     const intro = element("div", "interview-intro");
     intro.appendChild(element("p", "interview-task", task.title));
-    intro.appendChild(element("p", "interview-hint", history ? "Отправленный раунд · ответы доступны только для просмотра" : final ? "Проверьте название и описание перед созданием ветки." : "Для уточнения задачи может потребоваться до 30 вопросов."));
+    intro.appendChild(element("p", "interview-hint", history ? "Отправленный раунд · ответы доступны только для просмотра" : final ? "Проверьте название и описание перед созданием ветки." : "Зададим только необходимые уточнения — до 30 вопросов. Если задача ясна, перейдём к проверке карточки."));
     if (!history && current === 0 && !final) intro.appendChild(element("p", "interview-notice", "Проверьте ответы перед отправкой. После отправки раунда изменить их будет нельзя."));
     container.appendChild(intro);
     const body = element("div", "interview-body");
