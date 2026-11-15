@@ -68,10 +68,10 @@ async function team() {
     const tasks = projectId ? (await api(`/api/tasks?projectId=${encodeURIComponent(projectId)}`)).tasks : [];
     const grid = node("div", undefined, "team");
     for (const employee of employees) {
-        const count = tasks.filter((task) => task.assigneeId === employee.id).length;
+        const count = tasks.filter((task) => task.assigneeId === employee.id && task.column !== "done" && task.status !== "done").length;
         const card = node("article", undefined, "employee");
         card.append(person(employee), node("span", employee.executor_type === "ai_agent" ? "✦ AI Agent · выполнение пока не подключено" : "● Человек", "badge"), skills(employee));
-        card.append(node("p", `Назначено задач: ${count}. Ёмкость: ${employee.capacity} ч. за спринт.`, "note"));
+        card.append(node("p", `Незавершённых задач: ${count}. Ёмкость: ${employee.capacity} ч. за спринт.`, "note"));
         grid.append(card);
     }
     content.append(grid);
