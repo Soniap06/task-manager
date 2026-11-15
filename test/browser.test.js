@@ -232,7 +232,8 @@ test("board hides task details until opening the accessible task dialog", async 
     const f = browser(async () => ({ tasks: [item] }));
     await tick();
     const card = f.nodes.todo.children[0];
-    assert.equal(card.children.length, 2);
+    assert.equal(card.children.length, 3);
+    assert.equal(card.children[1].className, "task-assignee");
     assert.equal(f.nodes.taskDialog.open, false);
     assert.equal(f.nodes.connectionStatus.textContent, "");
     card.children[0].listeners.click();

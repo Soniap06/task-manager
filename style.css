@@ -89,6 +89,11 @@
     cursor: pointer;
 }
 .task-open:hover { background: #f5e8ec; }
+.task-assignee { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 14px 12px; color: #79525c; font-size: 10px; }
+.task-assignee-avatar, .task-assignee-initials { width: 28px; height: 28px; flex: 0 0 28px; border: 1px solid var(--rose-border); border-radius: 50%; }
+.task-assignee-avatar { display: block; object-fit: cover; background: white; }
+.task-assignee-initials { display: grid; place-items: center; background: #f5dce2; color: #502732; font-size: 9px; font-weight: 600; }
+.task-assignee-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-buttons { display: flex; gap: 5px; padding: 0 14px 12px; }
 .task-buttons button {
     border: 1px solid var(--rose-border);
