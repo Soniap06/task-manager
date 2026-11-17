@@ -177,7 +177,8 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
             const move = route.match(/^\/api\/tasks\/([a-f\d-]{36})\/column$/i);
             const taskUpdate = route.match(/^\/api\/tasks\/([a-f\d-]{36})$/i);
             const projectMutation = request.method === "POST" && ["/api/projects", "/api/github/repositories/resolve"].includes(route);
-            if ((request.method === "POST" && (route === "/api/tasks" || confirm || clarify || retry || move || projectMutation)) ||
+            const employeeMutation = (request.method === "POST" && route === "/api/employees") || (request.method === "PATCH" && employee);
+            if (employeeMutation || (request.method === "POST" && (route === "/api/tasks" || confirm || clarify || retry || move || projectMutation)) ||
                 (request.method === "PATCH" && (projectUpdate || taskUpdate))) {
                 if ((request.headers.origin && request.headers.origin !== origin) ||
                     ["cross-site", "same-site"].includes(request.headers["sec-fetch-site"])) {
@@ -188,6 +189,11 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                 }
                 const body = await readJson(request, 16_384);
                 if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError(400, "body", "Ожидался JSON-объект.");
+                if (employeeMutation) {
+                    if (request.method === "POST") json(response, 201, { employee: workspace.createEmployee(body) });
+                    else json(response, 200, { employee: workspace.updateEmployee(employee[1], body) });
+                    return;
+                }
                 if (projectMutation || projectUpdate) {
                     if (route === "/api/github/repositories/resolve") json(response, 200, { repository: await projects.resolve(body.url) });
                     else if (projectUpdate) json(response, 200, { project: await projects.update(projectUpdate[1], body) });
