@@ -1,6 +1,10 @@
 const content = document.getElementById("content");
 const pageTitle = document.getElementById("pageTitle");
 const page = location.pathname.slice(1);
+if (page === "login") {
+    document.body.classList.add("login-page");
+    document.querySelector(".project-chip").hidden = true;
+}
 let projectId = new URLSearchParams(location.search).get("projectId") || "";
 try { projectId ||= sessionStorage.getItem("task-manager.active-project.v1") || ""; } catch { /* Необязательный выбор. */ }
 
