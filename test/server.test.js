@@ -355,7 +355,7 @@ test("HTTP: invalid employee mutations fail without changing profiles", async (t
             const body = method === "POST" ? { ...input, ...invalid } : invalid;
             assert.equal((await fetch(target, { method, headers, body: JSON.stringify(body) })).status, 400, `${method}: ${JSON.stringify(invalid)}`);
         }
-        for (const [body, status] of [["{", 400], ["[]", 400], [JSON.stringify({ name: "x".repeat(17000) }), 413]]) {
+        for (const [body, status] of [["{", 400], ["[]", 400], [JSON.stringify({ name: "x".repeat(200000) }), 413]]) {
             assert.equal((await fetch(target, { method, headers, body })).status, status);
         }
         assert.equal((await fetch(target, { method, headers: { ...headers, "Content-Type": "text/plain" }, body: "{}" })).status, 415);

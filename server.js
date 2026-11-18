@@ -23,6 +23,7 @@ const assets = new Map([
     ["/style.css", ["style.css", "text/css; charset=utf-8"]]
 ]);
 for (const route of ["/team", "/events", "/profile", "/login"]) assets.set(route, ["public/index.html", "text/html; charset=utf-8"]);
+assets.set("/js/employee-options.js", ["public/js/employee-options.js", "text/javascript; charset=utf-8"]);
 assets.set("/js/app.js", ["public/js/app.js", "text/javascript; charset=utf-8"]);
 assets.set("/css/style.css", ["public/css/style.css", "text/css; charset=utf-8"]);
 
@@ -59,7 +60,7 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
         response.setHeader("X-Content-Type-Options", "nosniff");
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("Referrer-Policy", "no-referrer");
-        response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+        response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' https: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
         try {
             const port = server.address()?.port;
             const allowedHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
@@ -120,6 +121,13 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
             }
             if (request.method === "GET" && route === "/api/employees") {
                 json(response, 200, workspace.employees());
+                return;
+            }
+            const employeeAvatar = route.match(/^\/api\/employees\/([a-z\d-]+)\/avatar$/i);
+            if (request.method === "GET" && employeeAvatar) {
+                const avatar = workspace.avatar(employeeAvatar[1]);
+                response.writeHead(200, { "Content-Type": avatar.content_type, "Content-Length": avatar.data.length, "Content-Disposition": "inline" });
+                response.end(avatar.data);
                 return;
             }
             const employee = route.match(/^\/api\/employees\/([a-z\d-]+)$/i);
@@ -187,7 +195,7 @@ async function createApp({ config = loadConfig(), github = new GitHubClient(conf
                 if (request.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") {
                     throw new AppError(415, "content_type", "Используйте Content-Type: application/json.");
                 }
-                const body = await readJson(request, 16_384);
+                const body = await readJson(request, employeeMutation ? 196_608 : 16_384);
                 if (!body || typeof body !== "object" || Array.isArray(body)) throw new AppError(400, "body", "Ожидался JSON-объект.");
                 if (employeeMutation) {
                     if (request.method === "POST") json(response, 201, { employee: workspace.createEmployee(body) });

@@ -27,3 +27,41 @@ body{background:var(--bg-main);font-family:'Be Vietnam Pro',system-ui,sans-serif
 .workspace-project { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 24px; }
 .workspace-project select { padding: 10px; max-width: 100%; }
 [hidden] { display: none !important; }
+
+/* Управление общей командой */
+.team-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 18px 0 8px; flex-wrap: wrap; }
+.employee-edit { margin-top: 16px; }
+.employee .person > div { min-width: 0; }
+.employee .person h3, .employee .person p, .employee .chip { overflow-wrap: anywhere; }
+.employee .stack { display: flex; flex-wrap: wrap; gap: 6px; }
+.employee .person img { object-fit: cover; flex-shrink: 0; }
+.employee-editor { width: min(540px, calc(100% - 24px)); max-height: calc(100dvh - 32px); margin: auto; padding: 28px; border: 1px solid var(--border); border-radius: 16px; color: var(--text); background: #fff; overflow-y: auto; box-shadow: 0 16px 60px #280e172b; }
+.employee-editor::backdrop { background: #280e1766; }
+.employee-editor h2 { font-size: 22px; margin: 0 0 12px; }
+.employee-editor form > .note { margin-bottom: 18px; }
+.employee-editor .field { font-size: 13px; margin-top: 16px; }
+.employee-editor input, .employee-editor textarea, .employee-editor select { font: inherit; font-size: 16px; min-height: 44px; }
+.employee-editor textarea { resize: vertical; }
+.employee-editor .note { font-size: 12px; line-height: 1.5; }
+.employee-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.employee-error { color: #a51e36; font-size: 13px; line-height: 1.5; }
+.employee-editor :focus-visible, .employee-edit:focus-visible, .team-toolbar button:focus-visible { outline: 2px solid #79525c; outline-offset: 3px; }
+@media (max-width: 600px) {
+    .employee-editor { padding: 20px; }
+    .employee-actions { position: sticky; bottom: -20px; background: white; padding: 12px 0; }
+    .employee-actions .btn { flex: 1; }
+    .team-toolbar .btn { width: 100%; }
+}
+
+.employee-choices { border: 1px solid var(--border); border-radius: 10px; margin: 18px 0; padding: 12px; min-width: 0; }
+.employee-choices legend { font-size: 14px; font-weight: 600; padding: 0 6px; }
+.choice-list { display: grid; gap: 4px; max-height: 170px; overflow-y: auto; }
+.employee-choices .choice { display: flex; align-items: center; gap: 9px; font-size: 13px; padding: 6px 2px; }
+.employee-choices .choice[hidden] { display: none; }
+.employee-editor .choice input { width: 18px; height: 18px; min-height: 18px; margin: 0; flex-shrink: 0; accent-color: #79525c; }
+.selected-skills, .competency-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.selected-skills .chip { border: 1px solid #dac6cb; cursor: pointer; font-size: 12px; }
+.competency-tags .competency { background: #e5ede8; color: #234d3b; }
+.employee-avatar-preview { display: flex; align-items: center; gap: 16px; }
+.employee-avatar-preview img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; }
+.employee-editor input[type=file] { max-width: 100%; font-size: 13px; }
