@@ -323,3 +323,69 @@ test("HTTP: grilling accepts successive answers but never creates a branch durin
     assert.equal((await post(`/api/tasks/${task.id}/confirm`, task)).status, 200);
     assert.equal(f.github.creates, 1);
 });
+
+test("HTTP: employee creation and partial edits are readable through the employee API", async (t) => {
+    const f = await start(t);
+    const headers = { "Content-Type": "application/json", Origin: f.origin };
+    const input = { name: "Новый сотрудник", role: "Developer", executor_type: "human", stack: ["JavaScript", "SQLite"], capacity: 12, avatar_url: "https://example.test/avatar.png" };
+    const response = await fetch(f.origin + "/api/employees", { method: "POST", headers, body: JSON.stringify(input) });
+    assert.equal(response.status, 201);
+    const { employee } = await response.json();
+    assert.match(employee.id, /^[a-f\d-]{36}$/i);
+    for (const [key, value] of Object.entries(input)) assert.deepEqual(employee[key], value);
+    const patch = await fetch(`${f.origin}/api/employees/${employee.id}`, { method: "PATCH", headers, body: JSON.stringify({ capacity: 6, avatar_url: null }) });
+    assert.equal(patch.status, 200);
+    const updated = (await patch.json()).employee;
+    assert.deepEqual(updated, { ...employee, capacity: 6, avatar_url: null });
+    assert.deepEqual(await (await fetch(`${f.origin}/api/employees/${employee.id}`)).json(), updated);
+    const list = await (await fetch(f.origin + "/api/employees")).json();
+    assert.deepEqual(list.find((item) => item.id === employee.id), updated);
+    assert.equal(f.github.creates, 0);
+});
+
+test("HTTP: invalid employee mutations fail without changing profiles", async (t) => {
+    const f = await start(t);
+    const url = f.origin + "/api/employees";
+    const headers = { "Content-Type": "application/json", Origin: f.origin };
+    const before = await (await fetch(url)).json();
+    const input = { name: "Тест", role: "Developer" };
+    for (const method of ["POST", "PATCH"]) {
+        const target = url + (method === "PATCH" ? "/sofia" : "");
+        for (const invalid of [{ id: "forbidden" }, { name: "" }, { role: "" }, { capacity: -1 }, { executor_type: "robot" }, { stack: "JavaScript" }, { avatar_url: "javascript:alert(1)" }]) {
+            const body = method === "POST" ? { ...input, ...invalid } : invalid;
+            assert.equal((await fetch(target, { method, headers, body: JSON.stringify(body) })).status, 400, `${method}: ${JSON.stringify(invalid)}`);
+        }
+        for (const [body, status] of [["{", 400], ["[]", 400], [JSON.stringify({ name: "x".repeat(200000) }), 413]]) {
+            assert.equal((await fetch(target, { method, headers, body })).status, status);
+        }
+        assert.equal((await fetch(target, { method, headers: { ...headers, "Content-Type": "text/plain" }, body: "{}" })).status, 415);
+    }
+    assert.equal((await fetch(url + "/sofia", { method: "PATCH", headers, body: "{}" })).status, 400);
+    assert.equal((await fetch(url + "/" + randomUUID(), { method: "PATCH", headers, body: JSON.stringify({ capacity: 8 }) })).status, 404);
+    assert.deepEqual(await (await fetch(url)).json(), before);
+});
+
+test("HTTP: employee writes require shared login and canonical Origin", async (t) => {
+    const sharedOrigin = "https://team.example.test";
+    const f = await start(t, { sharedOrigin, auth: { username: "team", password: "test-password", secret: "s".repeat(32) } });
+    const headers = { Host: new URL(sharedOrigin).host, Origin: sharedOrigin, "Content-Type": "application/json" };
+    const input = { name: "Тест", role: "Developer" };
+    for (const [method, route, body] of [["POST", "/api/employees", input], ["PATCH", "/api/employees/sofia", { capacity: 8 }]]) {
+        assert.equal((await fetch(f.origin + route, { method, headers, body: JSON.stringify(body) })).status, 401);
+    }
+    const login = await fetch(f.origin + "/api/auth/login", { method: "POST", headers, body: JSON.stringify({ username: "team", password: "test-password" }) });
+    assert.equal(login.status, 200);
+    headers.Cookie = login.headers.get("set-cookie").split(";")[0];
+    const before = await (await fetch(f.origin + "/api/employees", { headers })).json();
+    for (const [method, route, body] of [["POST", "/api/employees", input], ["PATCH", "/api/employees/sofia", { capacity: 8 }]]) {
+        for (const origin of [null, "https://attacker.example"]) {
+            const invalidHeaders = { ...headers };
+            if (origin) invalidHeaders.Origin = origin;
+            else delete invalidHeaders.Origin;
+            assert.equal((await fetch(f.origin + route, { method, headers: invalidHeaders, body: JSON.stringify(body) })).status, 403);
+        }
+    }
+    assert.deepEqual(await (await fetch(f.origin + "/api/employees", { headers })).json(), before);
+    assert.equal((await fetch(f.origin + "/api/employees", { method: "POST", headers, body: JSON.stringify(input) })).status, 201);
+    assert.equal((await fetch(f.origin + "/api/employees/sofia", { method: "PATCH", headers, body: JSON.stringify({ capacity: 8 }) })).status, 200);
+});

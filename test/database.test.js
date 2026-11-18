@@ -29,11 +29,11 @@ test("SQLite: инициализация повторяема, данные со
     } finally { database.close(); }
     database = openDatabase(filename);
     try {
-        assert.equal(database.prepare("PRAGMA user_version").get().user_version, 2);
+        assert.equal(database.prepare("PRAGMA user_version").get().user_version, 3);
         assert.equal(database.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
         assert.equal(database.prepare("SELECT display_name FROM users WHERE id = ?").get(USER).display_name, "Карина");
         const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all().map((row) => row.name);
-        assert.deepEqual(tables, ["employees", "events", "projects", "tasks", "users", "webhook_deliveries"]);
+        assert.deepEqual(tables, ["employee_avatars", "employees", "events", "projects", "tasks", "users", "webhook_deliveries"]);
         assert.equal(database.prepare("PRAGMA integrity_check").get().integrity_check, "ok");
     } finally { database.close(); }
 });
@@ -120,7 +120,7 @@ test("SQLite: миграция версии 1 добавляет доставк�
     database.close();
     database = openDatabase(filename);
     try {
-        assert.equal(database.prepare("PRAGMA user_version").get().user_version, 2);
+        assert.equal(database.prepare("PRAGMA user_version").get().user_version, 3);
         assert.equal(database.prepare("SELECT display_name FROM users WHERE id=?").get(USER).display_name, "Сохранить пользователя");
         database.prepare("INSERT INTO webhook_deliveries (delivery_id) VALUES ('delivery')").run();
         assert.throws(() => database.prepare("INSERT INTO webhook_deliveries (delivery_id) VALUES ('delivery')").run(), /UNIQUE/);

@@ -84,3 +84,28 @@ test("fresh setup creates both configs and preserves personal settings on repeat
     assert.equal(await fs.readFile(path.join(f.root, ".env"), "utf8"), "PERSONAL_SETTING=keep\n");
     assert.equal(await fs.readFile(path.join(f.root, "ai.config.json"), "utf8"), '{"personal":"keep"}\n');
 });
+
+test("Qwen min_p is validated and older profiles remain valid", async (t) => {
+    const f = await fixture(t);
+    const generation = { ...defaults.generation, min_p: 0 };
+    await f.write({ ...defaults, generation });
+    assert.deepEqual(loadConfig({}, f.root).llm.generation, generation);
+    for (const patch of [{ min_p: -1 }, { min_p: 2 }]) {
+        await f.write({ ...defaults, generation: { ...generation, ...patch } });
+        assert.throws(() => loadConfig({}, f.root), { code: "ai_configuration" });
+    }
+    await f.write({ ...defaults, generation: { temperature: 0.1, max_tokens: 1600, repeat_penalty: 1.05 } });
+    assert.equal(loadConfig({}, f.root).llm.generation.temperature, 0.1);
+});
+
+test("draft review is opt-in for existing configurations and validates its type", async (t) => {
+    const f = await fixture(t);
+    await f.write({ ...defaults, reviewDraft: true });
+    assert.equal(loadConfig({}, f.root).llm.reviewDraft, true);
+    const previous = { ...defaults };
+    delete previous.reviewDraft;
+    await f.write(previous);
+    assert.equal(loadConfig({}, f.root).llm.reviewDraft, false);
+    await f.write({ ...defaults, reviewDraft: "true" });
+    assert.throws(() => loadConfig({}, f.root), { code: "ai_configuration" });
+});

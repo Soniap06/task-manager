@@ -31,6 +31,7 @@ async function loadEmployees() {
         option.value = employee.id;
         select.appendChild(option);
     }
+    renderBoard();
     if (byId("taskDialog").open) renderTaskDetails();
 }
 
@@ -62,6 +63,29 @@ async function api(url, options = {}) {
 const showError = (error) => { feedback.textContent = error.message; };
 const currentProject = () => projects.find((project) => project.id === activeProjectId);
 const draftKey = (id) => draftPrefix + id;
+
+function renderTaskAssignee(task) {
+    const employee = employees.find((item) => item.id === task.assigneeId);
+    const row = element("div", "task-assignee");
+    const name = employee?.name || (task.assigneeId ? "Исполнитель не найден" : "Не назначен");
+    const initials = employee?.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("ru-RU") || "—";
+    const avatarUrl = employee?.avatar_url;
+    const safeAvatarUrl = typeof avatarUrl === "string" && (/^https:\/\//i.test(avatarUrl) || (avatarUrl.startsWith("/") && !avatarUrl.startsWith("//") && !avatarUrl.includes("\\"))) ? avatarUrl : "";
+    if (safeAvatarUrl) {
+        const avatar = element("img", "task-assignee-avatar");
+        avatar.src = safeAvatarUrl;
+        avatar.alt = "";
+        avatar.loading = "lazy";
+        avatar.referrerPolicy = "no-referrer";
+        avatar.addEventListener("error", () => avatar.replaceWith(element("span", "task-assignee-initials", initials)), { once: true });
+        row.appendChild(avatar);
+    } else {
+        row.appendChild(element("span", "task-assignee-initials", initials));
+    }
+    row.appendChild(element("span", "task-assignee-name", name));
+    return row;
+}
+
 function getDraft(id) {
     try {
         const value = JSON.parse(localStorage.getItem(draftKey(id)));
@@ -214,6 +238,7 @@ function renderBoard() {
             byId("taskDialog").showModal();
         });
         card.appendChild(openButton);
+        card.appendChild(renderTaskAssignee(task));
         const buttons = element("div", "task-buttons");
         const taskColumn = columns.includes(task.column) ? task.column : "todo";
         const index = columns.indexOf(taskColumn);
@@ -331,7 +356,7 @@ function renderInterview(task, container) {
     byId("taskDialogTitle").textContent = final ? "Проверьте информацию о задаче" : `Уточнение задачи · Раунд ${page + 1}`;
     const intro = element("div", "interview-intro");
     intro.appendChild(element("p", "interview-task", task.title));
-    intro.appendChild(element("p", "interview-hint", history ? "Отправленный раунд · ответы доступны только для просмотра" : final ? "Проверьте название и описание перед созданием ветки." : "Для уточнения задачи может потребоваться до 30 вопросов."));
+    intro.appendChild(element("p", "interview-hint", history ? "Отправленный раунд · ответы доступны только для просмотра" : final ? "Проверьте название и описание перед созданием ветки." : "Зададим только необходимые уточнения — до 30 вопросов. Если задача ясна, перейдём к проверке карточки."));
     if (!history && current === 0 && !final) intro.appendChild(element("p", "interview-notice", "Проверьте ответы перед отправкой. После отправки раунда изменить их будет нельзя."));
     container.appendChild(intro);
     const body = element("div", "interview-body");
